@@ -1,23 +1,31 @@
-// Honomobo Operations - Connected to Airtable
+// Honomobo Operations - Connected to Airtable (with Documents)
 import React, { useState, useEffect, useMemo } from 'react';
 import { LayoutDashboard, ClipboardList, DollarSign, AlertTriangle, Menu, X, Plus, RefreshCw, Edit2, Trash2, Calendar, MapPin, Clock, CheckCircle, AlertCircle, FileText, Eye, Shield, ChevronDown, ChevronRight, Upload, Search, Check, History, Home } from 'lucide-react';
 
 // Airtable Configuration
 const AIRTABLE_API_KEY = import.meta.env.VITE_AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
-const AIRTABLE_TABLE_NAME = 'Projects';
+const PROJECTS_TABLE = 'Projects';
+const DOCUMENTS_TABLE = 'Documents';
 
 // Airtable API
 const airtableAPI = {
   async fetchProjects() {
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
-    if (!res.ok) throw new Error('Failed to fetch');
+    if (!res.ok) throw new Error('Failed to fetch projects');
+    const data = await res.json();
+    return data.records.map(r => ({ id: r.id, ...r.fields }));
+  },
+  async fetchDocuments() {
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${DOCUMENTS_TABLE}`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+    if (!res.ok) throw new Error('Failed to fetch documents');
     const data = await res.json();
     return data.records.map(r => ({ id: r.id, ...r.fields }));
   },
   async createProject(fields) {
-    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`, {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}`, {
       method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields })
     });
@@ -25,7 +33,7 @@ const airtableAPI = {
     return { id: data.id, ...data.fields };
   },
   async updateProject(id, fields) {
-    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${id}`, {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}/${id}`, {
       method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields })
     });
@@ -33,9 +41,25 @@ const airtableAPI = {
     return { id: data.id, ...data.fields };
   },
   async deleteProject(id) {
-    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${id}`, {
+    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}/${id}`, {
       method: 'DELETE', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` }
     });
+  },
+  async createDocument(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${DOCUMENTS_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async updateDocument(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${DOCUMENTS_TABLE}/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
   }
 };
 
@@ -179,70 +203,70 @@ function DeviationsView({ projects }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DRAWING MANAGEMENT VIEW
+// DRAWING MANAGEMENT VIEW - Connected to Airtable Documents
 // ══════════════════════════════════════════════════════════════════════════════
 
 const DRAWING_SETS = [
-  { id: 'site_assessment', name: 'Site Assessment', phase: 'design', required: true },
-  { id: 'concept', name: 'Concept Design', phase: 'design', required: true, customerApproval: true },
-  { id: 'permit', name: 'Permit Set', phase: 'permitting', required: true },
-  { id: 'ifc', name: 'IFC', phase: 'manufacturing', required: true, gatekeeper: true },
-  { id: 'shop', name: 'Shop Drawings', phase: 'manufacturing', required: false },
-  { id: 'asbuilt', name: 'As-Built', phase: 'closeout', required: false },
-  { id: 'closeout', name: 'Closeout Package', phase: 'closeout', required: false },
+  { id: 'Site Assessment', name: 'Site Assessment', phase: 'design', required: true },
+  { id: 'Concept Design', name: 'Concept Design', phase: 'design', required: true, customerApproval: true },
+  { id: 'Permit Set', name: 'Permit Set', phase: 'permitting', required: true },
+  { id: 'IFC', name: 'IFC', phase: 'manufacturing', required: true, gatekeeper: true },
+  { id: 'Shop Drawings', name: 'Shop Drawings', phase: 'manufacturing', required: false },
+  { id: 'As-Built', name: 'As-Built', phase: 'closeout', required: false },
+  { id: 'Closeout Package', name: 'Closeout Package', phase: 'closeout', required: false },
 ];
 
 const DOC_STATUSES = {
-  not_started: { label: 'Not Started', color: 'bg-gray-100 text-gray-600', icon: Clock },
-  draft: { label: 'Draft', color: 'bg-slate-100 text-slate-600', icon: FileText },
-  in_review: { label: 'In Review', color: 'bg-blue-100 text-blue-700', icon: Eye },
-  revision_requested: { label: 'Revision', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
-  approved: { label: 'Approved', color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle },
-  superseded: { label: 'Superseded', color: 'bg-gray-100 text-gray-500', icon: History },
+  'Not Started': { label: 'Not Started', color: 'bg-gray-100 text-gray-600', icon: Clock },
+  'Draft': { label: 'Draft', color: 'bg-slate-100 text-slate-600', icon: FileText },
+  'In Review': { label: 'In Review', color: 'bg-blue-100 text-blue-700', icon: Eye },
+  'Revision Requested': { label: 'Revision', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
+  'Approved': { label: 'Approved', color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle },
+  'Superseded': { label: 'Superseded', color: 'bg-gray-100 text-gray-500', icon: History },
 };
 
 const PHASES = { design: { label: 'Design', color: '#8B5CF6' }, permitting: { label: 'Permitting', color: '#F59E0B' }, manufacturing: { label: 'Manufacturing', color: '#10B981' }, closeout: { label: 'Closeout', color: '#64748B' } };
 
-// Sample documents (replace with Airtable)
-const sampleDocs = [
-  { id: 1, projectId: 'HO755', setType: 'site_assessment', version: 'v1', status: 'approved', uploadedBy: 'Olena K.', uploadDate: '2025-06-20' },
-  { id: 2, projectId: 'HO755', setType: 'concept', version: 'v1', status: 'approved', uploadedBy: 'Olena K.', uploadDate: '2025-08-15', customerApproval: true },
-  { id: 3, projectId: 'HO755', setType: 'permit', version: 'v1', status: 'approved', uploadedBy: 'Dmytro S.', uploadDate: '2025-10-10' },
-  { id: 4, projectId: 'HO755', setType: 'ifc', version: 'v1', status: 'in_review', uploadedBy: 'Dmytro S.', uploadDate: '2026-01-25' },
-  { id: 5, projectId: 'HO801', setType: 'site_assessment', version: 'v1', status: 'approved', uploadedBy: 'Olena K.', uploadDate: '2025-04-10' },
-  { id: 6, projectId: 'HO801', setType: 'concept', version: 'v1', status: 'approved', uploadedBy: 'Olena K.', uploadDate: '2025-05-20' },
-  { id: 7, projectId: 'HO801', setType: 'permit', version: 'v1', status: 'approved', uploadedBy: 'Dmytro S.', uploadDate: '2025-07-15' },
-  { id: 8, projectId: 'HO801', setType: 'ifc', version: 'v1', status: 'approved', uploadedBy: 'Dmytro S.', uploadDate: '2025-09-01' },
-];
-
 const formatDateShort = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
-const getLatestVersion = (pid, setType, docs) => docs.filter(d => d.projectId === pid && d.setType === setType && d.status !== 'superseded').sort((a, b) => b.version.localeCompare(a.version))[0] || null;
-const getSetStatus = (pid, docs) => { const s = {}; DRAWING_SETS.forEach(set => { const l = getLatestVersion(pid, set.id, docs); s[set.id] = l ? l.status : 'not_started'; }); return s; };
-const getReadiness = (pid, docs) => { const s = getSetStatus(pid, docs); const req = DRAWING_SETS.filter(x => x.required); const app = req.filter(x => s[x.id] === 'approved').length; return { app, total: req.length, pct: Math.round(app / req.length * 100), ifc: s.ifc === 'approved' }; };
+
+// Map Airtable document to internal format
+const mapAirtableDoc = (doc) => ({
+  id: doc.id,
+  projectId: doc.Name?.split(' - ')[0] || doc.Name || '',  // Extract project ID from name like "HO755 - Site Assessment"
+  setType: doc.Name?.split(' - ')[1] || 'Other',
+  status: doc.Status || 'Draft',
+  notes: doc.Notes || '',
+  assignee: doc.Assignee?.name || doc.Assignee || '',
+  version: 'v1',
+});
+
+const getLatestVersion = (pid, setType, docs) => docs.filter(d => d.projectId === pid && d.setType === setType && d.status !== 'Superseded').sort((a, b) => (b.version || '').localeCompare(a.version || ''))[0] || null;
+const getSetStatus = (pid, docs) => { const s = {}; DRAWING_SETS.forEach(set => { const l = getLatestVersion(pid, set.id, docs); s[set.id] = l ? l.status : 'Not Started'; }); return s; };
+const getReadiness = (pid, docs) => { const s = getSetStatus(pid, docs); const req = DRAWING_SETS.filter(x => x.required); const app = req.filter(x => s[x.id] === 'Approved').length; return { app, total: req.length, pct: Math.round(app / req.length * 100), ifc: s['IFC'] === 'Approved' }; };
 
 function DrawingStatusBadge({ status }) {
-  const cfg = DOC_STATUSES[status] || DOC_STATUSES.not_started;
+  const cfg = DOC_STATUSES[status] || DOC_STATUSES['Not Started'];
   const Icon = cfg.icon;
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}><Icon className="w-3 h-3" />{cfg.label}</span>;
 }
 
 function DrawingSetRow({ set, doc, onAction }) {
-  const status = doc?.status || 'not_started';
-  const bg = status === 'approved' ? 'bg-emerald-50 border-emerald-200' : status === 'revision_requested' ? 'bg-amber-50 border-amber-200' : status === 'in_review' ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200';
-  const iconBg = status === 'approved' ? 'bg-emerald-500' : status === 'revision_requested' ? 'bg-amber-500' : status === 'in_review' ? 'bg-blue-500' : 'bg-gray-300';
+  const status = doc?.status || 'Not Started';
+  const bg = status === 'Approved' ? 'bg-emerald-50 border-emerald-200' : status === 'Revision Requested' ? 'bg-amber-50 border-amber-200' : status === 'In Review' ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200';
+  const iconBg = status === 'Approved' ? 'bg-emerald-500' : status === 'Revision Requested' ? 'bg-amber-500' : status === 'In Review' ? 'bg-blue-500' : 'bg-gray-300';
   return (
     <div className={`flex items-center justify-between p-3 rounded-lg border ${bg}`}>
       <div className="flex items-center gap-3">
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-white ${iconBg}`}><FileText className="w-4 h-4" /></div>
         <div>
           <div className="flex items-center gap-2"><span className="font-medium">{set.name}</span>{set.required && <span className="text-xs text-gray-400">Required</span>}{set.gatekeeper && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 rounded">Gate</span>}</div>
-          {doc && <div className="text-xs text-gray-500">{doc.version} • {formatDateShort(doc.uploadDate)} by {doc.uploadedBy}</div>}
+          {doc && <div className="text-xs text-gray-500">{doc.version} {doc.assignee && `• ${doc.assignee}`}</div>}
         </div>
       </div>
       <div className="flex items-center gap-2">
         <DrawingStatusBadge status={status} />
-        {status === 'in_review' && <><button onClick={() => onAction('approve', doc)} className="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded"><Check className="w-4 h-4" /></button><button onClick={() => onAction('revision', doc)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded"><AlertTriangle className="w-4 h-4" /></button></>}
-        {status === 'not_started' && <button className="p-1.5 text-gray-400 hover:bg-gray-200 rounded"><Upload className="w-4 h-4" /></button>}
+        {status === 'In Review' && <><button onClick={() => onAction('approve', doc)} className="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded" title="Approve"><Check className="w-4 h-4" /></button><button onClick={() => onAction('revision', doc)} className="p-1.5 text-amber-600 hover:bg-amber-100 rounded" title="Request Revision"><AlertTriangle className="w-4 h-4" /></button></>}
+        {status === 'Not Started' && <button onClick={() => onAction('upload', { setType: set.id })} className="p-1.5 text-gray-400 hover:bg-gray-200 rounded" title="Upload"><Upload className="w-4 h-4" /></button>}
       </div>
     </div>
   );
@@ -251,8 +275,8 @@ function DrawingSetRow({ set, doc, onAction }) {
 function ProjectDrawingCard({ project, docs, expanded, onToggle, onAction }) {
   const readiness = getReadiness(project['Project ID'], docs);
   const status = getSetStatus(project['Project ID'], docs);
-  const inReview = DRAWING_SETS.filter(s => status[s.id] === 'in_review').length;
-  const needsRev = DRAWING_SETS.filter(s => status[s.id] === 'revision_requested').length;
+  const inReview = DRAWING_SETS.filter(s => status[s.id] === 'In Review').length;
+  const needsRev = DRAWING_SETS.filter(s => status[s.id] === 'Revision Requested').length;
   return (
     <div className="bg-white rounded-xl border overflow-hidden">
       <button onClick={onToggle} className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50">
@@ -292,24 +316,34 @@ function ProjectDrawingCard({ project, docs, expanded, onToggle, onAction }) {
   );
 }
 
-function DrawingManagementView({ projects }) {
-  const [docs, setDocs] = useState(sampleDocs);
+function DrawingManagementView({ projects, documents, onUpdateDoc }) {
   const [expanded, setExpanded] = useState(projects[0]?.['Project ID']);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
-  const handleAction = (action, doc) => {
-    if (action === 'approve') setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, status: 'approved' } : d));
-    else if (action === 'revision') setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, status: 'revision_requested' } : d));
+  // Map Airtable documents to internal format
+  const docs = useMemo(() => documents.map(mapAirtableDoc), [documents]);
+
+  const handleAction = async (action, doc) => {
+    if (!doc?.id) return;
+    try {
+      if (action === 'approve') {
+        await onUpdateDoc(doc.id, { Status: 'Approved' });
+      } else if (action === 'revision') {
+        await onUpdateDoc(doc.id, { Status: 'Revision Requested' });
+      }
+    } catch (err) {
+      alert('Error updating document: ' + err.message);
+    }
   };
 
   const stats = useMemo(() => {
     let inReview = 0, needsRev = 0, missingIFC = 0, ifcReady = 0;
     projects.forEach(p => {
       const s = getSetStatus(p['Project ID'], docs);
-      DRAWING_SETS.forEach(set => { if (s[set.id] === 'in_review') inReview++; if (s[set.id] === 'revision_requested') needsRev++; });
-      if (s.ifc !== 'approved' && ['D&E', 'Permitting'].includes(p.Stage)) missingIFC++;
-      if (s.ifc === 'approved') ifcReady++;
+      DRAWING_SETS.forEach(set => { if (s[set.id] === 'In Review') inReview++; if (s[set.id] === 'Revision Requested') needsRev++; });
+      if (s['IFC'] !== 'Approved' && ['D&E', 'Permitting'].includes(p.Stage)) missingIFC++;
+      if (s['IFC'] === 'Approved') ifcReady++;
     });
     return { inReview, needsRev, missingIFC, ifcReady };
   }, [projects, docs]);
@@ -317,9 +351,9 @@ function DrawingManagementView({ projects }) {
   const filtered = useMemo(() => {
     let r = projects;
     if (search) r = r.filter(p => p['Project ID']?.toLowerCase().includes(search.toLowerCase()) || p['Project Name']?.toLowerCase().includes(search.toLowerCase()));
-    if (filter === 'needs_review') r = r.filter(p => Object.values(getSetStatus(p['Project ID'], docs)).includes('in_review'));
-    if (filter === 'needs_revision') r = r.filter(p => Object.values(getSetStatus(p['Project ID'], docs)).includes('revision_requested'));
-    if (filter === 'ifc_pending') r = r.filter(p => getSetStatus(p['Project ID'], docs).ifc !== 'approved');
+    if (filter === 'needs_review') r = r.filter(p => Object.values(getSetStatus(p['Project ID'], docs)).includes('In Review'));
+    if (filter === 'needs_revision') r = r.filter(p => Object.values(getSetStatus(p['Project ID'], docs)).includes('Revision Requested'));
+    if (filter === 'ifc_pending') r = r.filter(p => getSetStatus(p['Project ID'], docs)['IFC'] !== 'Approved');
     return r;
   }, [projects, docs, search, filter]);
 
@@ -335,6 +369,11 @@ function DrawingManagementView({ projects }) {
         <div className="relative flex-1 max-w-xs"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Search projects..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm" /></div>
         <select value={filter} onChange={e => setFilter(e.target.value)} className="px-3 py-2 border rounded-lg text-sm"><option value="all">All</option><option value="needs_review">Needs Review</option><option value="needs_revision">Needs Revision</option><option value="ifc_pending">IFC Pending</option></select>
       </div>
+      {documents.length === 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-blue-700 text-sm">
+          <strong>Tip:</strong> Add documents in Airtable with naming format: <code className="bg-blue-100 px-1 rounded">ProjectID - Drawing Set</code> (e.g., "HO755 - IFC")
+        </div>
+      )}
       <div className="space-y-4">
         {filtered.length === 0 ? <div className="text-center py-8 text-gray-500">No projects found</div> : filtered.map(p => <ProjectDrawingCard key={p.id} project={p} docs={docs} expanded={expanded === p['Project ID']} onToggle={() => setExpanded(expanded === p['Project ID'] ? null : p['Project ID'])} onAction={handleAction} />)}
       </div>
@@ -356,6 +395,7 @@ const navItems = [
 
 export default function App() {
   const [projects, setProjects] = useState([]);
+  const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeView, setActiveView] = useState('wip');
@@ -363,15 +403,30 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
 
-  const loadProjects = async () => {
+  const loadData = async () => {
     setLoading(true); setError(null);
-    try { setProjects(await airtableAPI.fetchProjects()); } catch (e) { setError(e.message); } finally { setLoading(false); }
+    try {
+      const [projData, docData] = await Promise.all([
+        airtableAPI.fetchProjects(),
+        airtableAPI.fetchDocuments()
+      ]);
+      setProjects(projData);
+      setDocuments(docData);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) loadProjects(); else { setError('Airtable not configured'); setLoading(false); } }, []);
+  useEffect(() => { if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) loadData(); else { setError('Airtable not configured'); setLoading(false); } }, []);
 
   const handleSave = async (form, id) => { if (id) { const u = await airtableAPI.updateProject(id, form); setProjects(projects.map(p => p.id === id ? u : p)); } else { const c = await airtableAPI.createProject(form); setProjects([...projects, c]); } };
   const handleDelete = async id => { if (window.confirm('Delete?')) { await airtableAPI.deleteProject(id); setProjects(projects.filter(p => p.id !== id)); } };
+  const handleUpdateDoc = async (id, fields) => {
+    const updated = await airtableAPI.updateDocument(id, fields);
+    setDocuments(documents.map(d => d.id === id ? updated : d));
+  };
   const openEdit = p => { setEditingProject(p); setShowForm(true); };
   const openNew = () => { setEditingProject(null); setShowForm(true); };
   const closeForm = () => { setShowForm(false); setEditingProject(null); };
@@ -382,7 +437,7 @@ export default function App() {
       case 'wip': return <WIPScheduleView {...props} />;
       case 'jobs': return <JobScheduleView {...props} />;
       case 'budget': return <BudgetView {...props} />;
-      case 'drawings': return <DrawingManagementView projects={projects} />;
+      case 'drawings': return <DrawingManagementView projects={projects} documents={documents} onUpdateDoc={handleUpdateDoc} />;
       case 'deviations': return <DeviationsView {...props} />;
       default: return <WIPScheduleView {...props} />;
     }
@@ -406,9 +461,9 @@ export default function App() {
         </aside>
         <main className="flex-1 p-4 lg:p-8">
           <div className="mb-6 flex items-center justify-between">
-            <div><h2 className="text-2xl font-bold">{navItems.find(n => n.id === activeView)?.label}</h2><p className="text-gray-500">{projects.length} projects</p></div>
+            <div><h2 className="text-2xl font-bold">{navItems.find(n => n.id === activeView)?.label}</h2><p className="text-gray-500">{projects.length} projects • {documents.length} documents</p></div>
             <div className="hidden lg:flex gap-3">
-              <button onClick={loadProjects} disabled={loading} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />Refresh</button>
+              <button onClick={loadData} disabled={loading} className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />Refresh</button>
               <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Plus className="w-4 h-4" />New Project</button>
             </div>
           </div>
