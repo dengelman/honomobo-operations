@@ -99,7 +99,7 @@ function ProjectFormModal({ project, onSave, onClose }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD VIEW (Portfolio Overview)
 // ══════════════════════════════════════════════════════════════════════════════
-function DashboardView({ projects }) {
+function DashboardView({ projects, onEdit }) {
   const STAGES = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': '#64748b', 'Concept': '#a855f7', 'D&E': '#3b82f6', 'Permitting': '#f59e0b', 'Production': '#10b981', 'Logistics': '#f97316', 'Complete': '#6b7280' };
 
@@ -147,14 +147,15 @@ function DashboardView({ projects }) {
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="px-6 py-4 border-b font-semibold">Recent Projects</div>
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Value</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th></tr></thead>
+          <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Value</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th><th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th></tr></thead>
           <tbody className="divide-y divide-gray-200">
             {projects.slice(0, 10).map(p => (
-              <tr key={p.id} className="hover:bg-gray-50">
+              <tr key={p.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(p)}>
                 <td className="px-6 py-4"><div className="font-medium">{p['Project ID']}</div><div className="text-sm text-gray-500">{p['Project Name']}</div></td>
                 <td className="px-6 py-4"><span className="px-2 py-1 text-xs rounded-full" style={{ backgroundColor: `${stageColors[p.Stage]}20`, color: stageColors[p.Stage] }}>{p.Stage}</span></td>
                 <td className="px-6 py-4 text-right font-medium">{formatCurrency(p['Contract Value'])}</td>
                 <td className="px-6 py-4"><span className={`px-2 py-1 text-xs rounded-full ${p.Status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{p.Status}</span></td>
+                <td className="px-6 py-4 text-center"><button className="p-1.5 hover:bg-blue-50 rounded text-gray-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button></td>
               </tr>
             ))}
           </tbody>
@@ -167,7 +168,7 @@ function DashboardView({ projects }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // WIP SCHEDULE VIEW (Enhanced Spreadsheet)
 // ══════════════════════════════════════════════════════════════════════════════
-function WIPScheduleView({ projects }) {
+function WIPScheduleView({ projects, onEdit }) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': 'bg-gray-200', 'Concept': 'bg-purple-100', 'D&E': 'bg-blue-100', 'Permitting': 'bg-yellow-100', 'Production': 'bg-green-100', 'Logistics': 'bg-cyan-100', 'Complete': 'bg-gray-100' };
@@ -196,7 +197,7 @@ function WIPScheduleView({ projects }) {
               <div className={`rounded-t-lg px-3 py-2 font-medium text-sm ${stageColors[stage]}`}>{stage} ({sp.length})</div>
               <div className="bg-gray-50 rounded-b-lg p-2 min-h-24 space-y-2">
                 {sp.slice(0, 5).map(p => (
-                  <div key={p.id} className="bg-white rounded p-2 shadow-sm border text-sm">
+                  <div key={p.id} onClick={() => onEdit(p)} className="bg-white rounded p-2 shadow-sm border text-sm cursor-pointer hover:border-blue-300 hover:shadow-md transition-all">
                     <div className="font-medium">{p['Project ID']}</div>
                     <div className="text-xs text-gray-500">{p['Project Name']}</div>
                     <div className="text-xs text-gray-400 mt-1">{formatCurrency(p['Contract Value'])}</div>
@@ -520,7 +521,7 @@ const DRAWING_SETS = [{ id: 'Site Assessment', phase: 'design', required: true }
 const DOC_STATUSES = { 'Not Started': { color: 'bg-gray-100 text-gray-600' }, 'Draft': { color: 'bg-slate-100 text-slate-600' }, 'In Review': { color: 'bg-blue-100 text-blue-700' }, 'Revision Requested': { color: 'bg-amber-100 text-amber-700' }, 'Approved': { color: 'bg-emerald-100 text-emerald-700' } };
 const mapAirtableDoc = (doc) => ({ id: doc.id, projectId: doc.Name?.split(' - ')[0] || '', setType: doc.Name?.split(' - ')[1] || 'Other', status: doc.Status || 'Draft' });
 
-function DrawingsView({ projects, documents, onUpdateDoc }) {
+function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
   const [expanded, setExpanded] = useState(projects[0]?.['Project ID']);
   const [search, setSearch] = useState('');
   const docs = useMemo(() => documents.map(mapAirtableDoc), [documents]);
@@ -565,6 +566,7 @@ function DrawingsView({ projects, documents, onUpdateDoc }) {
                 <div className="flex items-center gap-4">
                   {readiness.ifc && <span className="flex items-center gap-1 text-emerald-600 text-sm"><Shield className="w-4 h-4" />IFC</span>}
                   <div className="w-32 flex items-center gap-2"><div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div className={`h-full rounded-full ${readiness.ifc ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${readiness.pct}%` }} /></div><span className="text-xs text-gray-500">{readiness.app}/{readiness.total}</span></div>
+                  <button onClick={(e) => { e.stopPropagation(); onEdit(p); }} className="p-2 hover:bg-blue-50 rounded-lg text-gray-400 hover:text-blue-600" title="Edit Project"><Edit2 className="w-4 h-4" /></button>
                   {isExpanded ? <ChevronDown className="w-5 h-5 text-gray-400" /> : <ChevronRight className="w-5 h-5 text-gray-400" />}
                 </div>
               </button>
@@ -661,7 +663,7 @@ export default function App() {
       case 'floor': return <ManufacturingFloorView />;
       case 'budget': return <BudgetView {...props} />;
       case 'pl': return <PLView />;
-      case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDoc} />;
+      case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDoc} onEdit={openEdit} />;
       case 'deviations': return <DeviationsView {...props} />;
       default: return <DashboardView {...props} />;
     }
