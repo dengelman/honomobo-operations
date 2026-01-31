@@ -135,7 +135,39 @@ const MFG_STATUS_TO_WEEK = {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
+// HONOMOBO PLANT LAYOUT - 3925 8 St, Nisku, AB (51,255 sq ft)
+// 12 indoor positions + 6 outdoor = 18 total
+// ══════════════════════════════════════════════════════════════════════════════
+const PLANT_POSITIONS = {
+  '1N': { bay: 1, row: 'N', zone: 'PRE-FAB', color: '#6366F1', desc: 'Pre-Fabrication' },
+  '1C': { bay: 1, row: 'C', zone: 'BUILD', color: '#3B82F6', desc: 'Build' },
+  '1S': { bay: 1, row: 'S', zone: 'BUILD', color: '#3B82F6', desc: 'Build' },
+  '2N': { bay: 2, row: 'N', zone: 'BUILD', color: '#3B82F6', desc: 'Build' },
+  '2C': { bay: 2, row: 'C', zone: 'BUILD', color: '#3B82F6', desc: 'Build' },
+  '2S': { bay: 2, row: 'S', zone: 'BUILD', color: '#3B82F6', desc: 'Build' },
+  '3N': { bay: 3, row: 'N', zone: 'BUILD', color: '#10B981', desc: 'Build' },
+  '3C': { bay: 3, row: 'C', zone: 'BUILD', color: '#10B981', desc: 'Build' },
+  '3S': { bay: 3, row: 'S', zone: 'BUILD', color: '#10B981', desc: 'Build' },
+  '4N': { bay: 4, row: 'N', zone: 'FAB 1', color: '#F59E0B', desc: 'Fabrication 1' },
+  '4C': { bay: 4, row: 'C', zone: 'FAB 2', color: '#F59E0B', desc: 'Fabrication 2' },
+  '4S': { bay: 4, row: 'S', zone: 'FAB FLEX', color: '#F59E0B', desc: 'Fab Flex' },
+  'OW': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor West' },
+  'OE': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor East' },
+  'OF1': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 1' },
+  'OF2': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 2' },
+  'OF3': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 3' },
+  'OF4': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 4' },
+};
+const POSITION_IDS = Object.keys(PLANT_POSITIONS);
+const INDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].bay > 0);
+const OUTDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].bay === 0);
+
+// ══════════════════════════════════════════════════════════════════════════════
 // PROJECT FORM MODAL
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROJECT FORM MODAL - Updated with 18 positions
 // ══════════════════════════════════════════════════════════════════════════════
 function ProjectFormModal({ project, onSave, onClose }) {
   const [form, setForm] = useState({
@@ -151,7 +183,7 @@ function ProjectFormModal({ project, onSave, onClose }) {
   });
   const [saving, setSaving] = useState(false);
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
-  const bays = ['', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4'];
+  const positions = ['', ...POSITION_IDS];
   const mfgStatuses = ['', 'Fabrication', 'Rough-In', 'Insulation', 'Finishing', 'Final QC', 'Ready to Ship'];
   const pms = ['', 'Sarah Chen', 'Nicole Murray', 'Ryan Sieben'];
 
@@ -167,6 +199,8 @@ function ProjectFormModal({ project, onSave, onClose }) {
       setSaving(false);
     }
   };
+
+  const selectedPosition = PLANT_POSITIONS[form['Bay Assignment']];
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -208,10 +242,19 @@ function ProjectFormModal({ project, onSave, onClose }) {
                 <h3 className="font-medium text-gray-700 mb-3">Manufacturing Details</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1">Bay Assignment</label>
+                    <label className="block text-sm font-medium mb-1">Position (Bay Assignment)</label>
                     <select value={form['Bay Assignment']} onChange={e => setForm({ ...form, 'Bay Assignment': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
-                      {bays.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
+                      {positions.map(p => (
+                        <option key={p} value={p}>
+                          {p ? `${p} - ${PLANT_POSITIONS[p]?.zone}` : '— Select Position —'}
+                        </option>
+                      ))}
                     </select>
+                    {selectedPosition && (
+                      <div className="mt-1 text-xs text-gray-500">
+                        Bay {selectedPosition.bay > 0 ? selectedPosition.bay : 'Outdoor'} • {selectedPosition.desc}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">MFG Week (1-12)</label>
@@ -238,10 +281,6 @@ function ProjectFormModal({ project, onSave, onClose }) {
     </div>
   );
 }
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DASHBOARD VIEW
-// ══════════════════════════════════════════════════════════════════════════════
 function DashboardView({ projects, onEdit }) {
   const STAGES = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': '#64748b', 'Concept': '#a855f7', 'D&E': '#3b82f6', 'Permitting': '#f59e0b', 'Production': '#10b981', 'Logistics': '#f97316', 'Complete': '#6b7280' };
@@ -856,139 +895,131 @@ function JobScheduleView({ projects, onEdit }) {
   );
 }
 
-// END OF PART 1
-// Continue in Part 2...
-
+// ══════════════════════════════════════════════════════════════════════════════
+// MANUFACTURING FLOOR VIEW - Visual Plant Layout (18 positions)
+// ══════════════════════════════════════════════════════════════════════════════
 function ManufacturingFloorView({ projects, onEdit }) {
-  const bays = [
-    { id: 'Bay 1', name: 'Bay 1', color: '#3B82F6' },
-    { id: 'Bay 2', name: 'Bay 2', color: '#10B981' },
-    { id: 'Bay 3', name: 'Bay 3', color: '#F59E0B' },
-    { id: 'Bay 4', name: 'Bay 4', color: '#8B5CF6' },
-  ];
-
   const productionProjects = useMemo(() =>
-    projects.filter(p => p.Stage === 'Production'),
+    projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics'),
     [projects]
   );
 
-  const getBayProject = (bayName) => {
-    return productionProjects.find(p => p['Bay Assignment'] === bayName);
+  const getPositionProject = (positionId) => {
+    return productionProjects.find(p => {
+      const assignment = p['Bay Assignment'] || '';
+      return assignment === positionId || assignment.toUpperCase() === positionId;
+    });
   };
 
-  const assignedCount = productionProjects.filter(p => p['Bay Assignment']).length;
-  const avgWeek = productionProjects.length > 0
-    ? Math.round(productionProjects.reduce((s, p) => s + (parseInt(p['MFG Week']) || 0), 0) / productionProjects.length)
-    : 0;
+  const occupiedIndoor = INDOOR_POSITIONS.filter(p => getPositionProject(p)).length;
+  const occupiedOutdoor = OUTDOOR_POSITIONS.filter(p => getPositionProject(p)).length;
+  const unassigned = productionProjects.filter(p => !p['Bay Assignment']).length;
+
+  const PositionCard = ({ positionId, size = 'normal' }) => {
+    const position = PLANT_POSITIONS[positionId];
+    const project = getPositionProject(positionId);
+    const isSmall = size === 'small';
+
+    return (
+      <div
+        className={`rounded-lg border-2 transition-all ${project ? 'cursor-pointer hover:shadow-lg' : ''} ${isSmall ? 'p-2' : 'p-3'}`}
+        style={{ borderColor: project ? position.color : '#E5E7EB', backgroundColor: project ? `${position.color}10` : '#FAFAFA' }}
+        onClick={() => project && onEdit(project)}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <span className={`font-bold ${isSmall ? 'text-xs' : 'text-sm'}`} style={{ color: position.color }}>{positionId}</span>
+          <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{position.zone}</span>
+        </div>
+        {project ? (
+          <div className={isSmall ? 'space-y-0.5' : 'space-y-1'}>
+            <div className={`font-semibold text-gray-900 ${isSmall ? 'text-xs' : 'text-sm'}`}>{project['Project ID']}</div>
+            <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{project['Status'] || ''}</div>
+            <div className="flex items-center justify-between">
+              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{project['Model'] || '—'}</span>
+              {project['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{project['MFG Week']}</span>}
+            </div>
+            {!isSmall && project['MFG Week'] && (
+              <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${(parseInt(project['MFG Week']) / 12) * 100}%`, backgroundColor: position.color }} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className={`text-center text-gray-400 ${isSmall ? 'py-2 text-xs' : 'py-4'}`}>
+            <Package className={`mx-auto mb-1 ${isSmall ? 'w-4 h-4' : 'w-6 h-6'}`} />
+            <span className={isSmall ? 'text-[10px]' : 'text-xs'}>Available</span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-500">
-        <span className="text-blue-600 font-medium">Data from Airtable</span> • Bay assignments from "Bay Assignment" field
-      </p>
-
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500 mb-1">Total in Production</div>
-          <div className="text-3xl font-bold">{productionProjects.length}</div>
-        </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500 mb-1">Bays Occupied</div>
-          <div className="text-3xl font-bold text-blue-600">{assignedCount}</div>
-        </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500 mb-1">Available Bays</div>
-          <div className="text-3xl font-bold text-emerald-600">{4 - assignedCount}</div>
-        </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500 mb-1">Avg Week</div>
-          <div className="text-3xl font-bold">{avgWeek}</div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Honomobo Manufacturing</h2>
+          <p className="text-sm text-gray-500">3925 8 St, Nisku, AB • 51,255 sq ft • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {bays.map(bay => {
-          const project = getBayProject(bay.id);
-          return (
-            <div key={bay.id} className="bg-white rounded-xl border overflow-hidden">
-              <div className="px-4 py-3 border-b flex items-center gap-2" style={{ backgroundColor: `${bay.color}15` }}>
-                <div className="w-4 h-4 rounded-full" style={{ backgroundColor: bay.color }} />
-                <span className="font-semibold text-gray-900">{bay.name}</span>
-                {project && <span className="ml-auto px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs rounded-full">Active</span>}
-                {!project && <span className="ml-auto px-2 py-0.5 bg-gray-100 text-gray-500 text-xs rounded-full">Empty</span>}
-              </div>
-
-              {project ? (
-                <div className="p-4 cursor-pointer hover:bg-gray-50" onClick={() => onEdit(project)}>
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="font-bold text-lg">{project['Project ID']}</div>
-                      <div className="text-gray-500">{project['Status'] || project['Customer (text)'] || ''}</div>
-                    </div>
-                    <span className="px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded">
-                      {project['Model'] || project['Unit Type'] || '—'}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">MFG Status</span>
-                      <span className="font-medium">{project['MFG Status'] || 'Not set'}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Week</span>
-                      <span className="font-medium">{project['MFG Week'] || '—'} / 12</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Market</span>
-                      <span className="font-medium">{project['Site State/Province'] || project['Market'] || '—'}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">PM</span>
-                      <span className="font-medium">{project['Project Manager'] || '—'}</span>
-                    </div>
-                  </div>
-
-                  {project['MFG Week'] && (
-                    <div className="mt-4">
-                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{ width: `${(parseInt(project['MFG Week']) / 12) * 100}%`, backgroundColor: bay.color }}
-                        />
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500 text-right">
-                        {Math.round((parseInt(project['MFG Week']) / 12) * 100)}% complete
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="p-8 text-center text-gray-400">
-                  <Package className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                  <p>Bay available</p>
-                  <p className="text-xs mt-1">Assign a project in Airtable</p>
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-5 gap-4">
+        <div className="bg-white rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">In Production</div><div className="text-3xl font-bold">{productionProjects.length}</div></div>
+        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Indoor</div><div className="text-3xl font-bold text-blue-600">{occupiedIndoor}<span className="text-lg text-gray-400">/12</span></div></div>
+        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Outdoor</div><div className="text-3xl font-bold text-purple-600">{occupiedOutdoor}<span className="text-lg text-gray-400">/6</span></div></div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Available</div><div className="text-3xl font-bold text-emerald-600">{18 - occupiedIndoor - occupiedOutdoor}</div></div>
+        <div className={`rounded-xl border p-4 ${unassigned > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}><div className="text-sm text-gray-500 mb-1">Unassigned</div><div className={`text-3xl font-bold ${unassigned > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{unassigned}</div></div>
       </div>
 
-      {productionProjects.filter(p => !p['Bay Assignment']).length > 0 && (
+      <div className="bg-white rounded-xl border p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-900">Plant Floor Layout</h3>
+          <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{backgroundColor:'#6366F1'}} /><span>Pre-Fab</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{backgroundColor:'#3B82F6'}} /><span>Build</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{backgroundColor:'#F59E0B'}} /><span>Fabrication</span></div>
+            <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{backgroundColor:'#8B5CF6'}} /><span>Outdoor</span></div>
+          </div>
+        </div>
+
+        <div className="border-2 border-gray-300 rounded-lg p-4 bg-gray-50">
+          <div className="text-center text-xs text-gray-400 mb-3">← MAIN FLOOR (51,255 SQ.FT.) →</div>
+          <div className="grid grid-cols-4 gap-4 mb-4">
+            <div className="text-center font-bold text-gray-700">BAY 1</div>
+            <div className="text-center font-bold text-gray-700">BAY 2</div>
+            <div className="text-center font-bold text-gray-700">BAY 3</div>
+            <div className="text-center font-bold text-gray-700">BAY 4</div>
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="space-y-3"><PositionCard positionId="1N" /><PositionCard positionId="1C" /><PositionCard positionId="1S" /></div>
+            <div className="space-y-3"><PositionCard positionId="2N" /><PositionCard positionId="2C" /><PositionCard positionId="2S" /></div>
+            <div className="space-y-3"><PositionCard positionId="3N" /><PositionCard positionId="3C" /><PositionCard positionId="3S" /></div>
+            <div className="space-y-3"><PositionCard positionId="4N" /><PositionCard positionId="4C" /><PositionCard positionId="4S" /></div>
+          </div>
+          <div className="flex justify-end mt-2 text-xs text-gray-400 gap-4 pr-4"><span>N = North</span><span>C = Center</span><span>S = South</span></div>
+        </div>
+
+        <div className="mt-4 border-2 border-dashed border-purple-300 rounded-lg p-4 bg-purple-50/30">
+          <div className="text-xs text-purple-600 font-medium mb-3">OUTDOOR STAGING (6 positions)</div>
+          <div className="grid grid-cols-6 gap-3">
+            <PositionCard positionId="OW" size="small" />
+            <PositionCard positionId="OE" size="small" />
+            <PositionCard positionId="OF1" size="small" />
+            <PositionCard positionId="OF2" size="small" />
+            <PositionCard positionId="OF3" size="small" />
+            <PositionCard positionId="OF4" size="small" />
+          </div>
+        </div>
+      </div>
+
+      {unassigned > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <h3 className="font-semibold text-amber-900 mb-3">Unassigned Production Projects</h3>
-          <p className="text-sm text-amber-700 mb-3">These projects need Bay Assignment in Airtable:</p>
-          <div className="grid grid-cols-4 gap-3">
+          <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2"><AlertCircle className="w-5 h-5" />Unassigned ({unassigned})</h3>
+          <div className="grid grid-cols-6 gap-3">
             {productionProjects.filter(p => !p['Bay Assignment']).map(p => (
-              <div
-                key={p.id}
-                className="bg-white rounded-lg p-3 border border-amber-200 cursor-pointer hover:shadow-md"
-                onClick={() => onEdit(p)}
-              >
-                <div className="font-semibold">{p['Project ID']}</div>
-                <div className="text-sm text-gray-500">{p['Model'] || '—'}</div>
-                <div className="text-xs text-amber-600 mt-1">Click to edit</div>
+              <div key={p.id} className="bg-white rounded-lg p-3 border border-amber-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
+                <div className="font-semibold text-sm">{p['Project ID']}</div>
+                <div className="text-xs text-gray-500">{p['Model'] || '—'}</div>
               </div>
             ))}
           </div>
@@ -999,8 +1030,220 @@ function ManufacturingFloorView({ projects, onEdit }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// BUDGET VIEW - Uses Real Airtable Data
+// PRODUCTION SCHEDULER - 18-Position Gantt Chart
 // ══════════════════════════════════════════════════════════════════════════════
+const SCHED_WEEKS_TO_SHOW = 20;
+const SCHED_MFG_DURATION = 12;
+const SCHED_MARKETS = {
+  california: { name: 'California', icon: '🌴', color: '#F59E0B' },
+  hawaii: { name: 'Hawaii', icon: '🏝️', color: '#06B6D4' },
+  colorado: { name: 'Colorado', icon: '🏔️', color: '#8B5CF6' },
+  alberta: { name: 'Alberta', icon: '🍁', color: '#EF4444' },
+  ontario: { name: 'Ontario', icon: '🍁', color: '#EC4899' },
+  bc: { name: 'BC', icon: '🌲', color: '#10B981' },
+  other: { name: 'Other', icon: '📍', color: '#6B7280' },
+};
+
+const getSchedWeekLabel = (weekOffset) => { const d = new Date(); d.setDate(d.getDate() + (weekOffset * 7)); return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); };
+const getSchedWeekNum = (weekOffset) => { const d = new Date(); const startOfYear = new Date(d.getFullYear(), 0, 1); d.setDate(d.getDate() + (weekOffset * 7)); return Math.ceil(((d - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7); };
+
+function ProductionSchedulerView({ projects }) {
+  const [viewOffset, setViewOffset] = useState(0);
+  const [zoneFilter, setZoneFilter] = useState('all');
+
+  const jobs = useMemo(() => {
+    return projects
+      .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics')
+      .map(p => {
+        const stateCode = p['Site State/Province'] || p['Market'] || '';
+        const market = MARKET_MAP[stateCode] || 'other';
+        const position = p['Bay Assignment'] || null;
+        const mfgWeek = parseInt(p['MFG Week']) || 0;
+        let startWeek = null, status = 'queued';
+        if (position) {
+          if (mfgWeek > 0) { startWeek = -mfgWeek; status = mfgWeek < 12 ? 'in_progress' : 'complete'; }
+          else { startWeek = 0; status = 'scheduled'; }
+        }
+        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id };
+      });
+  }, [projects]);
+
+  const weeks = useMemo(() => Array.from({ length: SCHED_WEEKS_TO_SHOW }, (_, i) => i + viewOffset - 6), [viewOffset]);
+  
+  const getFilteredPositions = () => {
+    if (zoneFilter === 'indoor') return INDOOR_POSITIONS;
+    if (zoneFilter === 'outdoor') return OUTDOOR_POSITIONS;
+    if (zoneFilter === 'fab') return ['4N', '4C', '4S'];
+    if (zoneFilter === 'build') return ['1N', '1C', '1S', '2N', '2C', '2S', '3N', '3C', '3S'];
+    return POSITION_IDS;
+  };
+  const positions = getFilteredPositions();
+  const queuedJobs = jobs.filter(j => j.status === 'queued');
+
+  const stats = useMemo(() => ({
+    inProgress: jobs.filter(j => j.status === 'in_progress').length,
+    scheduled: jobs.filter(j => j.status === 'scheduled').length,
+    queued: queuedJobs.length,
+    indoorUsed: INDOOR_POSITIONS.filter(p => jobs.some(j => j.position === p)).length,
+    outdoorUsed: OUTDOOR_POSITIONS.filter(p => jobs.some(j => j.position === p)).length,
+  }), [jobs, queuedJobs]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Production Scheduler</h2>
+          <p className="text-sm text-gray-500">18 positions • 12-week builds • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
+        </div>
+        <select value={zoneFilter} onChange={e => setZoneFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+          <option value="all">All Positions (18)</option>
+          <option value="indoor">Indoor Only (12)</option>
+          <option value="outdoor">Outdoor Only (6)</option>
+          <option value="fab">Fabrication (3)</option>
+          <option value="build">Build (9)</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-5 gap-4">
+        <div className="bg-white rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">In Progress</div><div className="text-3xl font-bold">{stats.inProgress}</div></div>
+        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Scheduled</div><div className="text-3xl font-bold text-blue-600">{stats.scheduled}</div></div>
+        <div className="bg-amber-50 border-amber-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">In Queue</div><div className="text-3xl font-bold text-amber-600">{stats.queued}</div></div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Indoor</div><div className="text-3xl font-bold text-emerald-600">{stats.indoorUsed}<span className="text-lg text-gray-400">/12</span></div></div>
+        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Outdoor</div><div className="text-3xl font-bold text-purple-600">{stats.outdoorUsed}<span className="text-lg text-gray-400">/6</span></div></div>
+      </div>
+
+      <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="flex items-center border-b bg-gray-50">
+          <div className="w-28 flex-shrink-0 p-3 border-r flex items-center justify-between">
+            <button onClick={() => setViewOffset(v => v - 4)} className="p-1 hover:bg-gray-200 rounded"><ChevronLeft className="w-4 h-4" /></button>
+            <span className="text-xs text-gray-500">Position</span>
+            <button onClick={() => setViewOffset(v => v + 4)} className="p-1 hover:bg-gray-200 rounded"><ChevronRight className="w-4 h-4" /></button>
+          </div>
+          <div className="flex-1 flex">
+            {weeks.map((w, i) => (
+              <div key={i} className={`flex-1 text-center py-2 text-xs border-r border-gray-100 ${w === 0 ? 'bg-blue-100 font-semibold text-blue-900' : 'text-gray-500'}`}>
+                <div>{getSchedWeekLabel(w)}</div>
+                <div className="text-[10px] text-gray-400">W{getSchedWeekNum(w)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {positions.map(posId => {
+          const pos = PLANT_POSITIONS[posId];
+          const positionJobs = jobs.filter(j => j.position === posId && j.startWeek !== null);
+          const isOutdoor = pos.bay === 0;
+
+          return (
+            <div key={posId} className={`flex items-stretch border-b border-gray-100 ${isOutdoor ? 'bg-purple-50/30' : ''}`}>
+              <div className="w-28 flex-shrink-0 p-2 bg-gray-50 border-r flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: pos.color }} />
+                <div><span className="font-medium text-sm">{posId}</span><div className="text-[10px] text-gray-400">{pos.zone}</div></div>
+              </div>
+              <div className="flex-1 flex relative min-h-[50px]">
+                {weeks.map((w, i) => <div key={i} className={`flex-1 border-r border-gray-100 ${w === 0 ? 'bg-blue-50/50' : ''}`} />)}
+                {positionJobs.map(job => {
+                  const idx = weeks.findIndex(w => w === job.startWeek);
+                  if (idx === -1) return null;
+                  const left = (idx / weeks.length) * 100;
+                  const duration = isOutdoor ? 4 : SCHED_MFG_DURATION;
+                  const width = (duration / weeks.length) * 100;
+                  const progress = job.mfgWeek / 12;
+                  const market = SCHED_MARKETS[job.market] || SCHED_MARKETS.other;
+                  return (
+                    <div key={job.id} className="absolute top-1 bottom-1 rounded-md overflow-hidden shadow-sm border cursor-pointer hover:shadow-md" style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, backgroundColor: `${pos.color}15`, borderColor: pos.color }}>
+                      <div className="absolute inset-y-0 left-0 opacity-30" style={{ width: `${progress * 100}%`, backgroundColor: pos.color }} />
+                      <div className="relative px-2 py-1 flex items-center justify-between h-full">
+                        <div className="flex items-center gap-1 min-w-0"><span className="font-semibold text-gray-900 text-xs truncate">{job.id}</span><span className="text-[10px]">{market.icon}</span></div>
+                        <span className="text-[10px] text-gray-500 flex-shrink-0">{job.model}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {queuedJobs.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2"><Package className="w-5 h-5" />Queue ({queuedJobs.length})</h3>
+          <div className="grid grid-cols-6 gap-3">
+            {queuedJobs.map(job => {
+              const market = SCHED_MARKETS[job.market] || SCHED_MARKETS.other;
+              return (
+                <div key={job.id} className="bg-white rounded-lg p-3 border border-amber-200">
+                  <div className="flex items-center justify-between mb-1"><span className="font-semibold text-sm">{job.id}</span><span>{market.icon}</span></div>
+                  <div className="text-xs text-gray-500 truncate">{job.name}</div>
+                  <div className="text-xs text-gray-400 mt-1">{job.model}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION BOARD VIEW
+// ══════════════════════════════════════════════════════════════════════════════
+const PROD_STAGES = [
+  { id: 'fabrication', name: 'Fabrication', color: '#3B82F6' },
+  { id: 'rough_in', name: 'Rough-In', color: '#F59E0B' },
+  { id: 'finishing', name: 'Finishing', color: '#8B5CF6' },
+  { id: 'final', name: 'Final QC', color: '#10B981' },
+  { id: 'ready', name: 'Ready to Ship', color: '#06B6D4' }
+];
+
+function ProductionBoardView({ projects, onEdit }) {
+  const productionProjects = useMemo(() =>
+    projects.filter(p => p.Stage === 'Production').map(p => ({
+      ...p,
+      boardStage: MFG_STATUS_TO_STAGE[p['MFG Status']] || 'fabrication'
+    })),
+    [projects]
+  );
+
+  return (
+    <div className="space-y-6">
+      <p className="text-sm text-gray-500"><span className="text-blue-600 font-medium">Data from Airtable</span> • Columns based on MFG Status</p>
+      <div className="grid grid-cols-5 gap-4">
+        {PROD_STAGES.map(stage => {
+          const stageProjects = productionProjects.filter(p => p.boardStage === stage.id);
+          return (
+            <div key={stage.id} className="bg-white rounded-xl border overflow-hidden">
+              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ backgroundColor: `${stage.color}15` }}>
+                <span className="font-semibold text-gray-900">{stage.name}</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium text-white" style={{ backgroundColor: stage.color }}>{stageProjects.length}</span>
+              </div>
+              <div className="p-3 space-y-2 min-h-[300px] max-h-[500px] overflow-y-auto">
+                {stageProjects.length === 0 ? <div className="text-center py-8 text-gray-400 text-sm">No projects</div> : stageProjects.map(p => (
+                  <div key={p.id} onClick={() => onEdit(p)} className="bg-gray-50 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow border border-gray-100">
+                    <div className="font-semibold text-gray-900">{p['Project ID']}</div>
+                    <div className="text-sm text-gray-500">{p['Status'] || ''}</div>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{p['Model'] || '—'}</span>
+                      <span className="text-xs text-gray-400">{p['Bay Assignment'] || 'No Pos'}</span>
+                    </div>
+                    {p['MFG Week'] && (
+                      <div className="mt-2">
+                        <div className="flex justify-between text-xs text-gray-500 mb-1"><span>W{p['MFG Week']}/12</span><span>{Math.round((parseInt(p['MFG Week']) / 12) * 100)}%</span></div>
+                        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(parseInt(p['MFG Week']) / 12) * 100}%`, backgroundColor: stage.color }} /></div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function BudgetView({ projects }) {
   const summary = useMemo(() => {
     const active = projects.filter(p => p.Stage !== 'Complete');
