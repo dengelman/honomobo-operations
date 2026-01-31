@@ -9,6 +9,7 @@ const AIRTABLE_API_KEY = import.meta.env.VITE_AIRTABLE_API_KEY;
 const AIRTABLE_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
 const PROJECTS_TABLE = 'Projects';
 const DOCUMENTS_TABLE = 'Documents';
+const ACTUALS_TABLE = 'Actuals';
 
 const airtableAPI = {
   async fetchProjects() {
@@ -53,6 +54,38 @@ const airtableAPI = {
     });
     const data = await res.json();
     return { id: data.id, ...data.fields };
+  },
+  async fetchActuals() {
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${ACTUALS_TABLE}`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+    if (!res.ok) throw new Error('Failed to fetch actuals');
+    const data = await res.json();
+    return data.records.map(r => ({ id: r.id, ...r.fields }));
+  },
+  async createActual(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${ACTUALS_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async createActualsBatch(records) {
+    // Airtable allows max 10 records per batch
+    const batches = [];
+    for (let i = 0; i < records.length; i += 10) {
+      batches.push(records.slice(i, i + 10));
+    }
+    const results = [];
+    for (const batch of batches) {
+      const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${ACTUALS_TABLE}`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: batch.map(fields => ({ fields })) })
+      });
+      const data = await res.json();
+      results.push(...(data.records || []).map(r => ({ id: r.id, ...r.fields })));
+    }
+    return results;
   }
 };
 
@@ -617,6 +650,256 @@ function DeviationsView({ projects }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// SAGE IMPORT VIEW
+// ══════════════════════════════════════════════════════════════════════════════
+function SageImportView({ projects, onImportComplete }) {
+  const [file, setFile] = useState(null);
+  const [parsedData, setParsedData] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [previewMode, setPreviewMode] = useState('costs'); // 'costs', 'invoices', 'pos'
+
+  // Parse CSV content
+  const parseCSV = (text) => {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    return lines.slice(1).map(line => {
+      const values = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || [];
+      const row = {};
+      headers.forEach((h, i) => { row[h] = (values[i] || '').trim().replace(/"/g, ''); });
+      return row;
+    });
+  };
+
+  // Map Sage data to our format
+  const mapSageData = (data) => {
+    return data.map(row => {
+      // Common Sage 50 export field names
+      const jobId = row['Job ID'] || row['Job'] || row['Job Number'] || row['Project'] || row['Job #'] || '';
+      const amount = parseFloat((row['Amount'] || row['Cost'] || row['Total'] || row['Debit'] || '0').replace(/[$,]/g, '')) || 0;
+      const date = row['Date'] || row['Transaction Date'] || row['Posting Date'] || new Date().toISOString().split('T')[0];
+      const vendor = row['Vendor'] || row['Vendor Name'] || row['Payee'] || row['Name'] || '';
+      const description = row['Description'] || row['Memo'] || row['Reference'] || row['Comment'] || '';
+      const type = row['Type'] || row['Transaction Type'] || row['Category'] || 'Cost';
+      const glAccount = row['GL Account'] || row['Account'] || row['Account Number'] || '';
+      const invoiceNum = row['Invoice #'] || row['Invoice Number'] || row['Document #'] || '';
+
+      // Try to match to a project
+      const matchedProject = projects.find(p =>
+        p['Project ID']?.toLowerCase() === jobId.toLowerCase() ||
+        p['Project ID']?.toLowerCase().includes(jobId.toLowerCase()) ||
+        jobId.toLowerCase().includes(p['Project ID']?.toLowerCase() || '')
+      );
+
+      return {
+        jobId,
+        projectId: matchedProject?.['Project ID'] || jobId,
+        projectMatch: matchedProject ? 'matched' : 'unmatched',
+        airtableProjectId: matchedProject?.id || null,
+        amount,
+        date,
+        vendor,
+        description,
+        type,
+        glAccount,
+        invoiceNum,
+        budget: matchedProject?.['Contract Value'] || 0
+      };
+    }).filter(r => r.jobId && r.amount !== 0);
+  };
+
+  const handleFile = (f) => {
+    if (!f) return;
+    setFile(f);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target.result;
+      const data = parseCSV(text);
+      const mapped = mapSageData(data);
+      setParsedData(mapped);
+      setImportResult(null);
+    };
+    reader.readAsText(f);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer.files[0];
+    if (f && (f.name.endsWith('.csv') || f.name.endsWith('.txt'))) handleFile(f);
+  };
+
+  const handleImport = async () => {
+    if (parsedData.length === 0) return;
+    setImporting(true);
+    try {
+      const records = parsedData.filter(r => r.projectMatch === 'matched').map(r => ({
+        'Project': r.airtableProjectId ? [r.airtableProjectId] : undefined,
+        'Project ID': r.projectId,
+        'Amount': r.amount,
+        'Date': r.date,
+        'Vendor': r.vendor,
+        'Description': r.description,
+        'Type': r.type,
+        'GL Account': r.glAccount,
+        'Invoice #': r.invoiceNum,
+        'Source': 'Sage Import'
+      }));
+
+      const results = await airtableAPI.createActualsBatch(records);
+      setImportResult({ success: true, count: results.length, message: `Successfully imported ${results.length} records` });
+      if (onImportComplete) onImportComplete();
+    } catch (err) {
+      setImportResult({ success: false, message: err.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Calculate summary stats
+  const summary = useMemo(() => {
+    const matched = parsedData.filter(r => r.projectMatch === 'matched');
+    const unmatched = parsedData.filter(r => r.projectMatch === 'unmatched');
+    const totalCost = matched.reduce((s, r) => s + r.amount, 0);
+    const totalBudget = [...new Set(matched.map(r => r.projectId))].reduce((s, pid) => {
+      const p = matched.find(r => r.projectId === pid);
+      return s + (p?.budget || 0);
+    }, 0);
+    const byProject = {};
+    matched.forEach(r => {
+      if (!byProject[r.projectId]) byProject[r.projectId] = { costs: 0, budget: r.budget, records: 0 };
+      byProject[r.projectId].costs += r.amount;
+      byProject[r.projectId].records++;
+    });
+    return { matched: matched.length, unmatched: unmatched.length, totalCost, totalBudget, variance: totalBudget - totalCost, byProject };
+  }, [parsedData]);
+
+  return (
+    <div className="space-y-6">
+      {/* Header Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border p-4"><div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><Upload className="w-4 h-4" />Records</div><div className="text-2xl font-bold">{parsedData.length}</div><div className="text-xs text-gray-400">{summary.matched} matched</div></div>
+        <div className="bg-white rounded-xl border p-4"><div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><DollarSign className="w-4 h-4" />Total Costs</div><div className="text-2xl font-bold">{formatCurrency(summary.totalCost)}</div><div className="text-xs text-gray-400">from Sage</div></div>
+        <div className="bg-white rounded-xl border p-4"><div className="flex items-center gap-2 text-gray-500 text-sm mb-1"><BarChart3 className="w-4 h-4" />Budget</div><div className="text-2xl font-bold">{formatCurrency(summary.totalBudget)}</div><div className="text-xs text-gray-400">matched projects</div></div>
+        <div className={`rounded-xl border p-4 ${summary.variance >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}><div className="flex items-center gap-2 text-gray-500 text-sm mb-1">{summary.variance >= 0 ? <TrendingUp className="w-4 h-4 text-emerald-600" /> : <TrendingDown className="w-4 h-4 text-red-600" />}Variance</div><div className={`text-2xl font-bold ${summary.variance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatCurrency(Math.abs(summary.variance))}</div><div className="text-xs text-gray-400">{summary.variance >= 0 ? 'under budget' : 'over budget'}</div></div>
+      </div>
+
+      {/* Upload Area */}
+      <div
+        className={`bg-white rounded-xl border-2 border-dashed p-8 text-center transition-colors ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}`}
+        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+      >
+        <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+        <h3 className="font-semibold text-lg mb-2">Import from Sage 50</h3>
+        <p className="text-gray-500 mb-4">Drag & drop your Sage export file (CSV) or click to browse</p>
+        <input type="file" accept=".csv,.txt" onChange={(e) => handleFile(e.target.files[0])} className="hidden" id="sage-file" />
+        <label htmlFor="sage-file" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"><Upload className="w-4 h-4" />Select File</label>
+        {file && <p className="mt-3 text-sm text-gray-600">Selected: <span className="font-medium">{file.name}</span></p>}
+      </div>
+
+      {/* Import Result */}
+      {importResult && (
+        <div className={`rounded-xl border p-4 ${importResult.success ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+          <div className="flex items-center gap-2">
+            {importResult.success ? <CheckCircle className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-red-600" />}
+            <span className={importResult.success ? 'text-emerald-800' : 'text-red-800'}>{importResult.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Data Preview */}
+      {parsedData.length > 0 && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold">Data Preview</h3>
+              <p className="text-sm text-gray-500">{summary.matched} matched, {summary.unmatched} unmatched records</p>
+            </div>
+            <button onClick={handleImport} disabled={importing || summary.matched === 0} className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              {importing ? <><RefreshCw className="w-4 h-4 animate-spin" />Importing...</> : <><Download className="w-4 h-4" />Import {summary.matched} Records</>}
+            </button>
+          </div>
+
+          {/* Cost Variance by Project */}
+          {Object.keys(summary.byProject).length > 0 && (
+            <div className="p-4 border-b bg-gray-50">
+              <h4 className="font-medium text-sm text-gray-700 mb-3">Cost Variance by Project</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.entries(summary.byProject).slice(0, 6).map(([pid, data]) => {
+                  const variance = data.budget - data.costs;
+                  const pct = data.budget > 0 ? (data.costs / data.budget * 100) : 0;
+                  return (
+                    <div key={pid} className="bg-white rounded-lg border p-3">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-medium">{pid}</span>
+                        <span className={`text-sm ${variance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{variance >= 0 ? '+' : ''}{formatCurrency(variance)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-500">{pct.toFixed(0)}%</span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">{formatCurrency(data.costs)} / {formatCurrency(data.budget)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Records Table */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {parsedData.slice(0, 50).map((row, idx) => (
+                  <tr key={idx} className={row.projectMatch === 'unmatched' ? 'bg-amber-50' : 'hover:bg-gray-50'}>
+                    <td className="px-4 py-3">{row.projectMatch === 'matched' ? <span className="inline-flex items-center gap-1 text-emerald-600 text-xs"><CheckCircle2 className="w-3 h-3" />Matched</span> : <span className="inline-flex items-center gap-1 text-amber-600 text-xs"><AlertCircle className="w-3 h-3" />No Match</span>}</td>
+                    <td className="px-4 py-3 font-medium">{row.jobId}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{row.date}</td>
+                    <td className="px-4 py-3 text-sm">{row.vendor}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500 max-w-xs truncate">{row.description}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatCurrency(row.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {parsedData.length > 50 && <div className="px-4 py-3 text-center text-sm text-gray-500 bg-gray-50">Showing 50 of {parsedData.length} records</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Help Section */}
+      <div className="bg-blue-50 rounded-xl border border-blue-200 p-6">
+        <h3 className="font-semibold text-blue-900 mb-2">How to Export from Sage 50</h3>
+        <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+          <li>In Sage 50, go to <strong>Reports & Forms → Jobs</strong></li>
+          <li>Select <strong>Job Ledger</strong> or <strong>Job Profitability</strong> report</li>
+          <li>Set your date range and click <strong>Display</strong></li>
+          <li>Click <strong>Export</strong> and choose <strong>CSV</strong> format</li>
+          <li>Save the file and upload it here</li>
+        </ol>
+        <p className="text-xs text-blue-600 mt-3">Supported fields: Job ID, Amount, Date, Vendor, Description, GL Account, Invoice #</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // NAVIGATION & MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
 const navItems = [
@@ -630,6 +913,7 @@ const navItems = [
   { id: 'pl', label: 'P&L', icon: TrendingUp },
   { id: 'drawings', label: 'Drawings', icon: FileText },
   { id: 'deviations', label: 'Deviations', icon: AlertTriangle },
+  { id: 'sage', label: 'Sage Import', icon: Upload },
 ];
 
 export default function App() {
@@ -665,6 +949,7 @@ export default function App() {
       case 'pl': return <PLView />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDoc} onEdit={openEdit} />;
       case 'deviations': return <DeviationsView {...props} />;
+      case 'sage': return <SageImportView projects={projects} onImportComplete={loadData} />;
       default: return <DashboardView {...props} />;
     }
   };
