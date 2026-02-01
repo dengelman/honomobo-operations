@@ -3149,7 +3149,7 @@ export default function App() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// KPI DASHBOARD VIEW - Auto-calculated from Airtable
+// KPI DASHBOARD VIEW - Auto-calculated from Airtable with Historical Trends
 // ══════════════════════════════════════════════════════════════════════════════
 const KPI_DEFINITIONS = [
   { id: 'concepts_signed', name: 'Concepts Signed', owner: 'Mark/Daniel', goal: 18, unit: 'mods', category: 'Sales' },
@@ -3174,6 +3174,7 @@ function KPIDashboardView({ projects, payments }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [drilldownKpi, setDrilldownKpi] = useState(null);
+  const [showTrends, setShowTrends] = useState(false);
 
   // Helper: Check if date is in selected month/year
   const isInMonth = (dateStr, month, year) => {
@@ -3182,116 +3183,163 @@ function KPIDashboardView({ projects, payments }) {
     return d.getMonth() === month && d.getFullYear() === year;
   };
 
-  // Helper: Get mod count from project (default 1 if not set)
   // Helper: Get mod count from model
   const getModCount = (p) => getModCountFromModel(p);
 
-  // Calculate KPI values from real data
-  const calculateKpiValues = useMemo(() => {
+  // Calculate KPI values for ANY month/year
+  const calculateKpiForMonth = (month, year) => {
     const values = {};
-    const details = {}; // Store which projects contributed
 
-    // Concepts Signed - Stage = Concept, signed this month
+    // Concepts Signed
     const conceptsSigned = projects.filter(p => 
-      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], selectedMonth, selectedYear)
+      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], month, year)
     );
     values.concepts_signed = conceptsSigned.reduce((sum, p) => sum + getModCount(p), 0);
-    details.concepts_signed = conceptsSigned;
 
     // Concepts Completed
     const conceptsCompleted = projects.filter(p => 
-      isInMonth(p['Concept Complete Date'], selectedMonth, selectedYear)
+      isInMonth(p['Concept Complete Date'], month, year)
     );
     values.concepts_completed = conceptsCompleted.reduce((sum, p) => sum + getModCount(p), 0);
-    details.concepts_completed = conceptsCompleted;
 
     // D&E Contracts Signed
     const deContracts = projects.filter(p => 
       (p.Stage === 'D&E' || p.Stage === 'Permitting' || p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Complete') &&
-      isInMonth(p['D&E Signed Date'], selectedMonth, selectedYear)
+      isInMonth(p['D&E Signed Date'], month, year)
     );
     values.de_contracts = deContracts.reduce((sum, p) => sum + getModCount(p), 0);
-    details.de_contracts = deContracts;
 
     // Mod IFC
-    const modIfc = projects.filter(p => isInMonth(p['IFC Date'], selectedMonth, selectedYear));
+    const modIfc = projects.filter(p => isInMonth(p['IFC Date'], month, year));
     values.mod_ifc = modIfc.reduce((sum, p) => sum + getModCount(p), 0);
-    details.mod_ifc = modIfc;
 
     // Permits Submitted
-    const permitsSubmitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], selectedMonth, selectedYear));
+    const permitsSubmitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], month, year));
     values.permits_submitted = permitsSubmitted.reduce((sum, p) => sum + getModCount(p), 0);
-    details.permits_submitted = permitsSubmitted;
 
     // Permits Approved
-    const permitsApproved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
+    const permitsApproved = projects.filter(p => isInMonth(p['Permit Approved Date'], month, year));
     values.permits_approved = permitsApproved.reduce((sum, p) => sum + getModCount(p), 0);
-    details.permits_approved = permitsApproved;
 
-    // Deposits Received (from Payments table)
+    // Deposits Received
     const depositsReceived = (payments || []).filter(p => 
       (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
       p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+      isInMonth(p['Date'] || p['Paid Date'], month, year)
     );
-    // For deposits, count related projects' mods
-    values.deposits = depositsReceived.length; // Simplified - could enhance with mod count
-    details.deposits = depositsReceived;
+    values.deposits = depositsReceived.length;
 
-    // Sales (Gross Margin) - Sum of Gross Margin for D&E contracts signed this month
+    // Sales (Gross Margin)
     values.sales_margin = deContracts.reduce((sum, p) => sum + (p['Gross Margin'] || 0), 0);
-    details.sales_margin = deContracts;
 
     // Fab Complete
-    const fabComplete = projects.filter(p => isInMonth(p['Fab Complete Date'], selectedMonth, selectedYear));
+    const fabComplete = projects.filter(p => isInMonth(p['Fab Complete Date'], month, year));
     values.fab_complete = fabComplete.reduce((sum, p) => sum + getModCount(p), 0);
-    details.fab_complete = fabComplete;
 
     // Drywall Complete
-    const drywallComplete = projects.filter(p => isInMonth(p['Drywall Complete Date'], selectedMonth, selectedYear));
+    const drywallComplete = projects.filter(p => isInMonth(p['Drywall Complete Date'], month, year));
     values.drywall_complete = drywallComplete.reduce((sum, p) => sum + getModCount(p), 0);
-    details.drywall_complete = drywallComplete;
 
-    // Invoicing - Manual for now
+    // Invoicing - Manual
     values.invoicing_mfg = null;
     values.invoicing_corp = null;
-    details.invoicing_mfg = [];
-    details.invoicing_corp = [];
 
     // Cash Collected
     const cashCollected = (payments || []).filter(p => 
       p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+      isInMonth(p['Date'] || p['Paid Date'], month, year)
     );
     values.cash_collected = cashCollected.reduce((sum, p) => sum + (p['Amount'] || 0), 0);
-    details.cash_collected = cashCollected;
+
+    return values;
+  };
+
+  // Calculate current month values with details
+  const calculateKpiValues = useMemo(() => {
+    const values = calculateKpiForMonth(selectedMonth, selectedYear);
+    const details = {};
+
+    // Get details for drilldown
+    details.concepts_signed = projects.filter(p => 
+      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], selectedMonth, selectedYear)
+    );
+    details.concepts_completed = projects.filter(p => 
+      isInMonth(p['Concept Complete Date'], selectedMonth, selectedYear)
+    );
+    details.de_contracts = projects.filter(p => 
+      (p.Stage === 'D&E' || p.Stage === 'Permitting' || p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Complete') &&
+      isInMonth(p['D&E Signed Date'], selectedMonth, selectedYear)
+    );
+    details.mod_ifc = projects.filter(p => isInMonth(p['IFC Date'], selectedMonth, selectedYear));
+    details.permits_submitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], selectedMonth, selectedYear));
+    details.permits_approved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
+    details.deposits = (payments || []).filter(p => 
+      (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
+      p['Status'] === 'Paid' &&
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+    );
+    details.sales_margin = details.de_contracts;
+    details.fab_complete = projects.filter(p => isInMonth(p['Fab Complete Date'], selectedMonth, selectedYear));
+    details.drywall_complete = projects.filter(p => isInMonth(p['Drywall Complete Date'], selectedMonth, selectedYear));
+    details.invoicing_mfg = [];
+    details.invoicing_corp = [];
+    details.cash_collected = (payments || []).filter(p => 
+      p['Status'] === 'Paid' &&
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+    );
 
     return { values, details };
   }, [projects, payments, selectedMonth, selectedYear]);
 
-  // Calculate historical data for sparklines (last 6 months)
+  // Calculate historical data for last 12 months
   const historicalData = useMemo(() => {
     const history = {};
+    const monthLabels = [];
     KPI_DEFINITIONS.forEach(kpi => { history[kpi.id] = []; });
 
-    for (let i = 5; i >= 0; i--) {
+    for (let i = 11; i >= 0; i--) {
       let m = selectedMonth - i;
       let y = selectedYear;
-      if (m < 0) { m += 12; y -= 1; }
+      while (m < 0) { m += 12; y -= 1; }
 
-      // Simplified historical calc - just for current month data
-      // In production, you'd want to recalculate for each month
+      monthLabels.push(`${MONTHS[m]} ${y.toString().slice(-2)}`);
+      const monthValues = calculateKpiForMonth(m, y);
+
       KPI_DEFINITIONS.forEach(kpi => {
-        if (i === 0) {
-          history[kpi.id].push(calculateKpiValues.values[kpi.id] || 0);
-        } else {
-          // Placeholder - would need actual historical data
-          history[kpi.id].push(null);
-        }
+        history[kpi.id].push(monthValues[kpi.id] || 0);
       });
     }
-    return history;
-  }, [calculateKpiValues, selectedMonth, selectedYear]);
+
+    return { history, monthLabels };
+  }, [projects, payments, selectedMonth, selectedYear]);
+
+  // Calculate 3-month moving average
+  const movingAverages = useMemo(() => {
+    const averages = {};
+    KPI_DEFINITIONS.forEach(kpi => {
+      const last3 = historicalData.history[kpi.id].slice(-3);
+      const validValues = last3.filter(v => v !== null && v !== undefined);
+      averages[kpi.id] = validValues.length > 0 
+        ? validValues.reduce((a, b) => a + b, 0) / validValues.length 
+        : 0;
+    });
+    return averages;
+  }, [historicalData]);
+
+  // Calculate YTD totals
+  const ytdTotals = useMemo(() => {
+    const ytd = {};
+    KPI_DEFINITIONS.forEach(kpi => {
+      // Sum all months in current year up to selected month
+      let total = 0;
+      for (let m = 0; m <= selectedMonth; m++) {
+        const monthValues = calculateKpiForMonth(m, selectedYear);
+        total += monthValues[kpi.id] || 0;
+      }
+      ytd[kpi.id] = total;
+    });
+    return ytd;
+  }, [projects, payments, selectedMonth, selectedYear]);
 
   const getStatusColor = (value, goal) => {
     if (value === null) return 'gray';
@@ -3302,7 +3350,7 @@ function KPIDashboardView({ projects, payments }) {
   };
 
   const formatValue = (value, unit) => {
-    if (value === null) return '—';
+    if (value === null || value === undefined) return '—';
     if (unit === '$') return formatCurrency(value);
     return value.toLocaleString();
   };
@@ -3325,19 +3373,37 @@ function KPIDashboardView({ projects, payments }) {
     return { onTrack, atRisk, behind };
   }, [calculateKpiValues]);
 
-  // Sparkline component
-  const Sparkline = ({ data, color }) => {
-    const max = Math.max(...data.filter(d => d !== null), 1);
-    const width = 60;
-    const height = 20;
+  // Mini sparkline component
+  const Sparkline = ({ data, color, height = 24, width = 80 }) => {
     const validData = data.map(d => d === null ? 0 : d);
-    const points = validData.map((v, i) => `${(i / (validData.length - 1)) * width},${height - (v / max) * height}`).join(' ');
+    const max = Math.max(...validData, 1);
+    const min = Math.min(...validData, 0);
+    const range = max - min || 1;
+    const points = validData.map((v, i) => 
+      `${(i / (validData.length - 1)) * width},${height - ((v - min) / range) * (height - 4) - 2}`
+    ).join(' ');
     
     return (
       <svg width={width} height={height} className="inline-block">
-        <polyline fill="none" stroke={color} strokeWidth="1.5" points={points} />
+        <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
+        {/* Dot on last point */}
+        <circle 
+          cx={width} 
+          cy={height - ((validData[validData.length - 1] - min) / range) * (height - 4) - 2}
+          r="3" 
+          fill={color} 
+        />
       </svg>
     );
+  };
+
+  // Trend indicator
+  const TrendIndicator = ({ current, average }) => {
+    if (average === 0) return null;
+    const diff = ((current - average) / average) * 100;
+    if (Math.abs(diff) < 5) return <span className="text-gray-400 text-xs">→ flat</span>;
+    if (diff > 0) return <span className="text-emerald-600 text-xs flex items-center gap-0.5"><TrendingUp className="w-3 h-3" />+{diff.toFixed(0)}%</span>;
+    return <span className="text-red-600 text-xs flex items-center gap-0.5"><TrendingDown className="w-3 h-3" />{diff.toFixed(0)}%</span>;
   };
 
   return (
@@ -3373,6 +3439,13 @@ function KPIDashboardView({ projects, payments }) {
           >
             {categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}
           </select>
+          <button
+            onClick={() => setShowTrends(!showTrends)}
+            className={`px-3 py-2 text-sm rounded-lg border ${showTrends ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white text-gray-600'}`}
+          >
+            <BarChart3 className="w-4 h-4 inline mr-1" />
+            Trends
+          </button>
         </div>
       </div>
 
@@ -3396,6 +3469,47 @@ function KPIDashboardView({ projects, payments }) {
         </div>
       </div>
 
+      {/* Historical Trend Chart (when enabled) */}
+      {showTrends && (
+        <div className="bg-white rounded-xl border p-6">
+          <h3 className="font-semibold mb-4">12-Month Trend</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 px-3 font-medium text-gray-500">KPI</th>
+                  {historicalData.monthLabels.map((label, i) => (
+                    <th key={i} className={`text-center py-2 px-2 font-medium ${i === 11 ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}>
+                      {label}
+                    </th>
+                  ))}
+                  <th className="text-center py-2 px-3 font-medium text-gray-500 bg-amber-50">3M Avg</th>
+                  <th className="text-center py-2 px-3 font-medium text-gray-500 bg-emerald-50">YTD</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredKpis.map(kpi => (
+                  <tr key={kpi.id} className="hover:bg-gray-50">
+                    <td className="py-2 px-3 font-medium">{kpi.name}</td>
+                    {historicalData.history[kpi.id].map((val, i) => (
+                      <td key={i} className={`text-center py-2 px-2 ${i === 11 ? 'bg-blue-50 font-semibold' : ''}`}>
+                        {kpi.unit === '$' ? formatCompact(val) : val}
+                      </td>
+                    ))}
+                    <td className="text-center py-2 px-3 bg-amber-50 font-medium">
+                      {kpi.unit === '$' ? formatCompact(movingAverages[kpi.id]) : movingAverages[kpi.id].toFixed(1)}
+                    </td>
+                    <td className="text-center py-2 px-3 bg-emerald-50 font-medium">
+                      {kpi.unit === '$' ? formatCompact(ytdTotals[kpi.id]) : ytdTotals[kpi.id]}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* KPI Table */}
       <div className="bg-white rounded-xl border overflow-hidden">
         <table className="min-w-full">
@@ -3407,7 +3521,8 @@ function KPIDashboardView({ projects, payments }) {
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actual</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">% to Goal</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Trend</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Trend (12mo)</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase bg-amber-50">3M Avg</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Details</th>
             </tr>
           </thead>
@@ -3450,10 +3565,16 @@ function KPIDashboardView({ projects, payments }) {
                     }`} />
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <Sparkline 
-                      data={historicalData[kpi.id]} 
-                      color={status === 'emerald' ? '#10B981' : status === 'amber' ? '#F59E0B' : '#EF4444'} 
-                    />
+                    <div className="flex items-center justify-center gap-2">
+                      <Sparkline 
+                        data={historicalData.history[kpi.id]} 
+                        color={status === 'emerald' ? '#10B981' : status === 'amber' ? '#F59E0B' : '#EF4444'} 
+                      />
+                      <TrendIndicator current={value || 0} average={movingAverages[kpi.id]} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-center text-sm text-gray-600">
+                    {kpi.unit === '$' ? formatCompact(movingAverages[kpi.id]) : movingAverages[kpi.id].toFixed(1)}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {details.length > 0 && (
