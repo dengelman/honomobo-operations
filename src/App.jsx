@@ -3493,6 +3493,8 @@ const COUNTRY_MAP = {
   // USA - state codes (CA = California, not Canada!)
   'CA': 'USA', 'HI': 'USA', 'CO': 'USA', 'WA': 'USA', 'NY': 'USA', 'OR': 'USA', 
   'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA', 'WI': 'USA',
+  'MA': 'USA', 'MI': 'USA', 'NJ': 'USA', 'CT': 'USA', 'PA': 'USA', 'OH': 'USA', 'IL': 'USA', 'GA': 'USA',
+  'NC': 'USA', 'VA': 'USA', 'MD': 'USA', 'SC': 'USA', 'TN': 'USA', 'MO': 'USA', 'IN': 'USA', 'KY': 'USA',
   'US': 'USA', 'USA': 'USA',
 };
 
@@ -4075,7 +4077,8 @@ function InvestorDashboardView({ projects, payments }) {
     // Geographic split
     const usaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
-      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL', 'WI'].includes(market);
+      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL', 'WI', 
+              'MA', 'MI', 'NJ', 'CT', 'PA', 'OH', 'IL', 'GA', 'NC', 'VA', 'MD', 'SC', 'TN', 'MO', 'IN', 'KY'].includes(market);
     });
     const canadaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
