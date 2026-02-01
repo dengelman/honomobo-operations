@@ -309,6 +309,20 @@ function DashboardView({ projects, onEdit }) {
   const STAGES = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': '#64748b', 'Concept': '#a855f7', 'D&E': '#3b82f6', 'Permitting': '#f59e0b', 'Production': '#10b981', 'Logistics': '#f97316', 'Complete': '#6b7280' };
 
+  // Detect duplicate Project IDs
+  const duplicates = useMemo(() => {
+    const idCounts = {};
+    projects.forEach(p => {
+      const id = p['Project ID'];
+      if (id) {
+        idCounts[id] = (idCounts[id] || 0) + 1;
+      }
+    });
+    return Object.entries(idCounts)
+      .filter(([id, count]) => count > 1)
+      .map(([id, count]) => ({ id, count }));
+  }, [projects]);
+
   const metrics = useMemo(() => {
     const active = projects.filter(p => p.Stage !== 'Complete');
     const total = active.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
@@ -336,6 +350,22 @@ function DashboardView({ projects, onEdit }) {
 
   return (
     <div className="space-y-6">
+      {/* Duplicate Warning */}
+      {duplicates.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
+            <div>
+              <div className="font-medium text-red-800">Duplicate Projects Detected</div>
+              <div className="text-sm text-red-600 mt-1">
+                {duplicates.map(d => `${d.id} (${d.count}x)`).join(', ')}
+              </div>
+              <div className="text-xs text-red-500 mt-2">Remove duplicates in Airtable to fix data accuracy</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border p-5">
           <div className="flex justify-between items-start mb-2">
