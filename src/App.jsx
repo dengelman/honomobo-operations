@@ -1442,52 +1442,70 @@ const PLSummaryCard = ({ title, value, subtitle, icon: Icon, color = 'gray' }) =
   );
 };
 
-function PLView({ projects }) {
+function PLView({ projects, onUpdateProject }) {
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [budgetValue, setBudgetValue] = useState('');
+
+  // Get D&E and L&I projects for editing
+  const deProjects = projects.filter(p => p.Stage === 'D&E');
+  const liProjects = projects.filter(p => p.Stage === 'Logistics');
+
+  // Calculate totals from actual project data
+  const deTotals = useMemo(() => ({
+    revenue: deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: deProjects.reduce((s, p) => s + (p['D&E Budget'] || 0), 0)
+  }), [deProjects]);
+
+  const liTotals = useMemo(() => ({
+    revenue: liProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: liProjects.reduce((s, p) => s + (p['L&I Budget'] || 0), 0)
+  }), [liProjects]);
+
   // Calculate production revenue/costs from real project data
   const productionData = useMemo(() => {
     const prodProjects = projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
-    const deProjects = projects.filter(p => p.Stage === 'D&E');
 
     // Total values
     const totalProdContract = prodProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
     const totalProdBudget = prodProjects.reduce((s, p) => s + (p['MFG Budget'] || 0), 0);
-    const totalDeContract = deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
 
     // Distribute across months based on project count and progress
     const revenue = {};
     const costs = {};
 
     plMonths.forEach((month, idx) => {
-      // Simple distribution - more revenue in current and upcoming months
       const currentMonth = new Date().getMonth();
       let weight;
-
-      if (idx < currentMonth) {
-        weight = 0.06; // Past months - some revenue recognized
-      } else if (idx === currentMonth) {
-        weight = 0.12; // Current month - higher
-      } else if (idx < currentMonth + 3) {
-        weight = 0.10; // Next few months
-      } else {
-        weight = 0.08; // Further out
-      }
+      if (idx < currentMonth) weight = 0.06;
+      else if (idx === currentMonth) weight = 0.12;
+      else if (idx < currentMonth + 3) weight = 0.10;
+      else weight = 0.08;
 
       revenue[month] = Math.round(totalProdContract * weight);
       costs[month] = Math.round(totalProdBudget * weight);
     });
 
-    return { revenue, costs, totalProdContract, totalProdBudget, totalDeContract, prodCount: prodProjects.length, deCount: deProjects.length };
+    return { revenue, costs, totalProdContract, totalProdBudget, prodCount: prodProjects.length };
   }, [projects]);
 
+  // Use calculated totals from project data
   const [inputs, setInputs] = useState({
-    deRevenue: 200000,
-    liRevenue: 100000,
-    deCosts: 140000,
-    liCosts: 80000,
     mfgOverhead: 175000,
     corpOverhead: 175000,
     prodMarginSplitMfg: 0.5
   });
+
+  // Handle budget edit
+  const handleBudgetSave = async (project, field) => {
+    const value = parseInt(budgetValue) || 0;
+    try {
+      await onUpdateProject({ [field]: value }, project.id);
+      setEditingBudget(null);
+      setBudgetValue('');
+    } catch (err) {
+      alert('Error saving: ' + err.message);
+    }
+  };
 
   const [expandedSections, setExpandedSections] = useState({
     revenue: true,
@@ -1501,17 +1519,23 @@ function PLView({ projects }) {
 
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
-  // Calculate all P&L values using real data
+  // Calculate all P&L values using real project data
   const plData = useMemo(() => {
     const data = {};
+    // Monthly distribution of D&E and L&I (spread across 12 months)
+    const deMonthlyRev = Math.round(deTotals.revenue / 12);
+    const deMonthlyBudget = Math.round(deTotals.budget / 12);
+    const liMonthlyRev = Math.round(liTotals.revenue / 12);
+    const liMonthlyBudget = Math.round(liTotals.budget / 12);
+
     plMonths.forEach(month => {
       const prodRev = productionData.revenue[month] || 0;
       const prodCost = productionData.costs[month] || 0;
-      const deRevenue = inputs.deRevenue;
-      const liRevenue = inputs.liRevenue;
+      const deRevenue = deMonthlyRev;
+      const liRevenue = liMonthlyRev;
       const totalRevenue = deRevenue + prodRev + liRevenue;
-      const deCosts = inputs.deCosts;
-      const liCosts = inputs.liCosts;
+      const deCosts = deMonthlyBudget;
+      const liCosts = liMonthlyBudget;
       const totalCogs = deCosts + prodCost + liCosts;
       const deGP = deRevenue - deCosts;
       const prodGP = prodRev - prodCost;
@@ -1534,7 +1558,7 @@ function PLView({ projects }) {
       };
     });
     return data;
-  }, [productionData, inputs]);
+  }, [productionData, inputs, deTotals, liTotals]);
 
   // Calculate YTD totals
   const ytdTotals = useMemo(() => {
@@ -1588,9 +1612,9 @@ function PLView({ projects }) {
         <div>
           <h1 className="text-xl font-bold text-gray-900">2026 Monthly P&L Projection</h1>
           <p className="text-sm text-gray-500 mt-1">
-            <span className="text-blue-600 font-medium">Production data from Airtable</span> •
-            {productionData.prodCount} production projects, {productionData.deCount} D&E projects •
-            <span className="inline-block w-3 h-3 bg-amber-200 rounded mx-1"></span> Yellow = Manual Input
+            <span className="text-blue-600 font-medium">All data from Airtable</span> •
+            {productionData.prodCount} production, {deProjects.length} D&E, {liProjects.length} L&I projects •
+            Click Inputs to edit D&E/L&I budgets
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1607,25 +1631,8 @@ function PLView({ projects }) {
       </div>
 
       {showInputs && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <h3 className="font-semibold text-amber-900 mb-4">Monthly Inputs (D&E, L&I, Overhead are manual - Production from Airtable)</h3>
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Revenue/mo</label>
-              <input type="number" value={inputs.deRevenue} onChange={(e) => setInputs({ ...inputs, deRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Revenue/mo</label>
-              <input type="number" value={inputs.liRevenue} onChange={(e) => setInputs({ ...inputs, liRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Costs/mo</label>
-              <input type="number" value={inputs.deCosts} onChange={(e) => setInputs({ ...inputs, deCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Costs/mo</label>
-              <input type="number" value={inputs.liCosts} onChange={(e) => setInputs({ ...inputs, liCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm text-amber-800 mb-1">MFG Overhead/mo</label>
               <input type="number" value={inputs.mfgOverhead} onChange={(e) => setInputs({ ...inputs, mfgOverhead: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
@@ -1637,6 +1644,86 @@ function PLView({ projects }) {
             <div>
               <label className="block text-sm text-amber-800 mb-1">Prod Margin to MFG %</label>
               <input type="number" min="0" max="100" value={inputs.prodMarginSplitMfg * 100} onChange={(e) => setInputs({ ...inputs, prodMarginSplitMfg: (parseInt(e.target.value) || 0) / 100 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+          </div>
+
+          {/* D&E Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">D&E Projects (Total Revenue: ${deTotals.revenue.toLocaleString()} | Total Budget: ${deTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">D&E Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `de-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'D&E Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`de-${p.id}`); setBudgetValue(p['D&E Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['D&E Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* L&I Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">L&I Projects (Total Revenue: ${liTotals.revenue.toLocaleString()} | Total Budget: ${liTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">L&I Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liProjects.length === 0 ? (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No L&I projects</td></tr>
+                  ) : liProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `li-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'L&I Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`li-${p.id}`); setBudgetValue(p['L&I Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['L&I Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2377,7 +2464,7 @@ export default function App() {
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
       case 'budget': return <BudgetView projects={projects} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
-      case 'pl': return <PLView projects={projects} />;
+      case 'pl': return <PLView projects={projects} onUpdateProject={handleSaveProject} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
       case 'deviations': return <DeviationsView projects={projects} onEdit={handleEdit} />;
       case 'sage': return <SageImportView projects={projects} onImportComplete={loadData} />;
