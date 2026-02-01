@@ -61,8 +61,8 @@ const airtableAPI = {
     });
     const data = await res.json();
     if (data.error) {
-      console.error('Airtable update error:', data.error);
-      throw new Error(data.error.message || 'Failed to update project');
+      console.error('Airtable error:', data.error);
+      throw new Error(data.error.message || 'Failed to update');
     }
     return { id: data.id, ...data.fields };
   },
@@ -476,61 +476,72 @@ const WipCell = ({ value, isBaseline, isEditing, onStartEdit, onChange }) => {
 };
 
 function WIPScheduleView({ projects }) {
-  // Calculate WIP % based on MFG Status milestones
+  // Calculate WIP % based on real Airtable data (Stage + MFG Week)
+  // WIP % by MFG Status - matches actual cost curve
+  const MFG_STATUS_TO_WIP = {
+    'Fab Complete': 25,
+    'Framing Complete': 50,
+    'Mech Rough Ins Complete': 65,
+    'Drywall Complete': 75,
+    'Final QC': 95,
+    'Ready to Ship': 100,
+  };
+
   const calculateWipFromProject = (p) => {
     const stage = p.Stage;
-    const mfgStatus = p['MFG Status'] || p['MFG Stage'];
-
-    // Only manufacturing stages have WIP
+    const mfgStatus = p['MFG Status'];
+    
+    // Pre-production stages (D&E work not in MFG WIP)
+    if (stage === 'Assessment') return 0;
+    if (stage === 'Concept') return 0;
+    if (stage === 'D&E') return 0;
+    if (stage === 'Permitting') return 0;
+    
+    // Post-production
+    if (stage === 'Complete') return 100;
     if (stage === 'Logistics') return 100;
-    if (stage !== 'Production') return 0;
-
-    // Production stage - WIP based on MFG Status
-    const MFG_WIP = {
-      'Fab Complete': 25,
-      'Framing Complete': 50,
-      'Mech Rough Ins Complete': 65,
-      'Drywall Complete': 75,
-      'Final QC': 100,
-      'Ready to Ship': 100
-    };
-
-    return MFG_WIP[mfgStatus] || 0; // 0% at start of manufacturing
+    
+    // Production stage - use MFG Status
+    if (stage === 'Production') {
+      if (mfgStatus && MFG_STATUS_TO_WIP[mfgStatus]) {
+        return MFG_STATUS_TO_WIP[mfgStatus];
+      }
+      return 0; // Start of manufacturing = 0%
+    }
+    
+    return 0;
   };
 
   const buildWipData = (projects) => {
     return projects
-      .filter(p => ['Production', 'Logistics'].includes(p.Stage))
+      .filter(p => ['Production', 'Logistics', 'D&E', 'Permitting'].includes(p.Stage))
       .map(p => {
         const currentWip = calculateWipFromProject(p);
-        const currentMonth = new Date().getMonth(); // 0 = Jan, 1 = Feb, etc.
-
-        // Generate WIP schedule - approximately 25% progress per month
+        const currentMonth = new Date().getMonth(); // 0 = Jan
+        
+        // Generate WIP schedule
         const wip = {};
         WIP_MONTHS.forEach((m, idx) => {
           if (idx === 0) {
-            // Dec 31 baseline - estimate where project was at end of last year
-            const monthsFromDec = currentMonth + 1; // How many months since Dec
-            const decWip = Math.max(0, currentWip - (monthsFromDec * 25));
-            wip[m.key] = decWip > 0 ? decWip : null;
+            // Dec baseline - estimate prior month
+            wip[m.key] = currentWip > 10 ? Math.max(0, currentWip - 15) : null;
           } else {
             const monthIndex = idx - 1; // 0 = Jan
             if (monthIndex < currentMonth) {
-              // Past months - show progression to current (25% per month)
+              // Past months - show progression to current
               const monthsAgo = currentMonth - monthIndex;
-              wip[m.key] = Math.max(0, currentWip - (monthsAgo * 25));
-              if (wip[m.key] === 0 && currentWip > 0) wip[m.key] = null; // Not started yet
+              wip[m.key] = Math.max(0, currentWip - (monthsAgo * 8));
             } else if (monthIndex === currentMonth) {
-              // Current month - actual WIP
+              // Current month
               wip[m.key] = currentWip;
             } else {
-              // Future months - project forward 25% per month to 100%
+              // Future months - project forward
               const monthsAhead = monthIndex - currentMonth;
-              wip[m.key] = Math.min(100, currentWip + (monthsAhead * 25));
+              wip[m.key] = Math.min(100, currentWip + (monthsAhead * 8));
             }
           }
         });
-
+        
         return {
           id: p['Project ID'],
           customer: p['Status'] || p['Customer (text)'] || '',
@@ -1442,70 +1453,52 @@ const PLSummaryCard = ({ title, value, subtitle, icon: Icon, color = 'gray' }) =
   );
 };
 
-function PLView({ projects, onUpdateProject }) {
-  const [editingBudget, setEditingBudget] = useState(null);
-  const [budgetValue, setBudgetValue] = useState('');
-
-  // Get D&E and L&I projects for editing
-  const deProjects = projects.filter(p => p.Stage === 'D&E');
-  const liProjects = projects.filter(p => p.Stage === 'Logistics');
-
-  // Calculate totals from actual project data
-  const deTotals = useMemo(() => ({
-    revenue: deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
-    budget: deProjects.reduce((s, p) => s + (p['D&E Budget'] || 0), 0)
-  }), [deProjects]);
-
-  const liTotals = useMemo(() => ({
-    revenue: liProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
-    budget: liProjects.reduce((s, p) => s + (p['L&I Budget'] || 0), 0)
-  }), [liProjects]);
-
+function PLView({ projects }) {
   // Calculate production revenue/costs from real project data
   const productionData = useMemo(() => {
     const prodProjects = projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
+    const deProjects = projects.filter(p => p.Stage === 'D&E');
 
     // Total values
     const totalProdContract = prodProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
     const totalProdBudget = prodProjects.reduce((s, p) => s + (p['MFG Budget'] || 0), 0);
+    const totalDeContract = deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
 
     // Distribute across months based on project count and progress
     const revenue = {};
     const costs = {};
 
     plMonths.forEach((month, idx) => {
+      // Simple distribution - more revenue in current and upcoming months
       const currentMonth = new Date().getMonth();
       let weight;
-      if (idx < currentMonth) weight = 0.06;
-      else if (idx === currentMonth) weight = 0.12;
-      else if (idx < currentMonth + 3) weight = 0.10;
-      else weight = 0.08;
+
+      if (idx < currentMonth) {
+        weight = 0.06; // Past months - some revenue recognized
+      } else if (idx === currentMonth) {
+        weight = 0.12; // Current month - higher
+      } else if (idx < currentMonth + 3) {
+        weight = 0.10; // Next few months
+      } else {
+        weight = 0.08; // Further out
+      }
 
       revenue[month] = Math.round(totalProdContract * weight);
       costs[month] = Math.round(totalProdBudget * weight);
     });
 
-    return { revenue, costs, totalProdContract, totalProdBudget, prodCount: prodProjects.length };
+    return { revenue, costs, totalProdContract, totalProdBudget, totalDeContract, prodCount: prodProjects.length, deCount: deProjects.length };
   }, [projects]);
 
-  // Use calculated totals from project data
   const [inputs, setInputs] = useState({
+    deRevenue: 200000,
+    liRevenue: 100000,
+    deCosts: 140000,
+    liCosts: 80000,
     mfgOverhead: 175000,
     corpOverhead: 175000,
     prodMarginSplitMfg: 0.5
   });
-
-  // Handle budget edit
-  const handleBudgetSave = async (project, field) => {
-    const value = parseInt(budgetValue) || 0;
-    try {
-      await onUpdateProject({ [field]: value }, project.id);
-      setEditingBudget(null);
-      setBudgetValue('');
-    } catch (err) {
-      alert('Error saving: ' + err.message);
-    }
-  };
 
   const [expandedSections, setExpandedSections] = useState({
     revenue: true,
@@ -1519,23 +1512,17 @@ function PLView({ projects, onUpdateProject }) {
 
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
-  // Calculate all P&L values using real project data
+  // Calculate all P&L values using real data
   const plData = useMemo(() => {
     const data = {};
-    // Monthly distribution of D&E and L&I (spread across 12 months)
-    const deMonthlyRev = Math.round(deTotals.revenue / 12);
-    const deMonthlyBudget = Math.round(deTotals.budget / 12);
-    const liMonthlyRev = Math.round(liTotals.revenue / 12);
-    const liMonthlyBudget = Math.round(liTotals.budget / 12);
-
     plMonths.forEach(month => {
       const prodRev = productionData.revenue[month] || 0;
       const prodCost = productionData.costs[month] || 0;
-      const deRevenue = deMonthlyRev;
-      const liRevenue = liMonthlyRev;
+      const deRevenue = inputs.deRevenue;
+      const liRevenue = inputs.liRevenue;
       const totalRevenue = deRevenue + prodRev + liRevenue;
-      const deCosts = deMonthlyBudget;
-      const liCosts = liMonthlyBudget;
+      const deCosts = inputs.deCosts;
+      const liCosts = inputs.liCosts;
       const totalCogs = deCosts + prodCost + liCosts;
       const deGP = deRevenue - deCosts;
       const prodGP = prodRev - prodCost;
@@ -1558,7 +1545,7 @@ function PLView({ projects, onUpdateProject }) {
       };
     });
     return data;
-  }, [productionData, inputs, deTotals, liTotals]);
+  }, [productionData, inputs]);
 
   // Calculate YTD totals
   const ytdTotals = useMemo(() => {
@@ -1612,9 +1599,9 @@ function PLView({ projects, onUpdateProject }) {
         <div>
           <h1 className="text-xl font-bold text-gray-900">2026 Monthly P&L Projection</h1>
           <p className="text-sm text-gray-500 mt-1">
-            <span className="text-blue-600 font-medium">All data from Airtable</span> •
-            {productionData.prodCount} production, {deProjects.length} D&E, {liProjects.length} L&I projects •
-            Click Inputs to edit D&E/L&I budgets
+            <span className="text-blue-600 font-medium">Production data from Airtable</span> •
+            {productionData.prodCount} production projects, {productionData.deCount} D&E projects •
+            <span className="inline-block w-3 h-3 bg-amber-200 rounded mx-1"></span> Yellow = Manual Input
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1631,8 +1618,25 @@ function PLView({ projects, onUpdateProject }) {
       </div>
 
       {showInputs && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <h3 className="font-semibold text-amber-900 mb-4">Monthly Inputs (D&E, L&I, Overhead are manual - Production from Airtable)</h3>
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm text-amber-800 mb-1">D&E Revenue/mo</label>
+              <input type="number" value={inputs.deRevenue} onChange={(e) => setInputs({ ...inputs, deRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm text-amber-800 mb-1">L&I Revenue/mo</label>
+              <input type="number" value={inputs.liRevenue} onChange={(e) => setInputs({ ...inputs, liRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm text-amber-800 mb-1">D&E Costs/mo</label>
+              <input type="number" value={inputs.deCosts} onChange={(e) => setInputs({ ...inputs, deCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm text-amber-800 mb-1">L&I Costs/mo</label>
+              <input type="number" value={inputs.liCosts} onChange={(e) => setInputs({ ...inputs, liCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
             <div>
               <label className="block text-sm text-amber-800 mb-1">MFG Overhead/mo</label>
               <input type="number" value={inputs.mfgOverhead} onChange={(e) => setInputs({ ...inputs, mfgOverhead: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
@@ -1644,86 +1648,6 @@ function PLView({ projects, onUpdateProject }) {
             <div>
               <label className="block text-sm text-amber-800 mb-1">Prod Margin to MFG %</label>
               <input type="number" min="0" max="100" value={inputs.prodMarginSplitMfg * 100} onChange={(e) => setInputs({ ...inputs, prodMarginSplitMfg: (parseInt(e.target.value) || 0) / 100 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-          </div>
-
-          {/* D&E Projects - Editable Budgets */}
-          <div>
-            <h4 className="font-semibold text-amber-900 mb-2">D&E Projects (Total Revenue: ${deTotals.revenue.toLocaleString()} | Total Budget: ${deTotals.budget.toLocaleString()})</h4>
-            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-amber-100">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Project</th>
-                    <th className="px-3 py-2 text-left">Customer</th>
-                    <th className="px-3 py-2 text-right">Contract Value</th>
-                    <th className="px-3 py-2 text-right">D&E Budget (click to edit)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deProjects.map(p => (
-                    <tr key={p.id} className="border-t border-amber-100">
-                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
-                      <td className="px-3 py-2">{p.Status}</td>
-                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">
-                        {editingBudget === `de-${p.id}` ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
-                            <button onClick={() => handleBudgetSave(p, 'D&E Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
-                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => { setEditingBudget(`de-${p.id}`); setBudgetValue(p['D&E Budget'] || 0); }} className="text-blue-600 hover:underline">
-                            ${(p['D&E Budget'] || 0).toLocaleString()}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* L&I Projects - Editable Budgets */}
-          <div>
-            <h4 className="font-semibold text-amber-900 mb-2">L&I Projects (Total Revenue: ${liTotals.revenue.toLocaleString()} | Total Budget: ${liTotals.budget.toLocaleString()})</h4>
-            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-amber-100">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Project</th>
-                    <th className="px-3 py-2 text-left">Customer</th>
-                    <th className="px-3 py-2 text-right">Contract Value</th>
-                    <th className="px-3 py-2 text-right">L&I Budget (click to edit)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {liProjects.length === 0 ? (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No L&I projects</td></tr>
-                  ) : liProjects.map(p => (
-                    <tr key={p.id} className="border-t border-amber-100">
-                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
-                      <td className="px-3 py-2">{p.Status}</td>
-                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">
-                        {editingBudget === `li-${p.id}` ? (
-                          <div className="flex items-center justify-end gap-1">
-                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
-                            <button onClick={() => handleBudgetSave(p, 'L&I Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
-                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => { setEditingBudget(`li-${p.id}`); setBudgetValue(p['L&I Budget'] || 0); }} className="text-blue-600 hover:underline">
-                            ${(p['L&I Budget'] || 0).toLocaleString()}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -1813,215 +1737,7 @@ function PLView({ projects, onUpdateProject }) {
 }
 
 // END OF PART 2
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DRAWINGS VIEW - Document Control
-// ══════════════════════════════════════════════════════════════════════════════
-function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [filter, setFilter] = useState('all');
-
-  const projectDocs = selectedProject
-    ? documents.filter(d => d.Project?.includes(selectedProject.id))
-    : documents;
-
-  const filteredDocs = filter === 'all'
-    ? projectDocs
-    : projectDocs.filter(d => d.Category === filter);
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Drawings & Documents</h1>
-        <div className="flex gap-4">
-          <select
-            value={selectedProject?.id || ''}
-            onChange={e => setSelectedProject(projects.find(p => p.id === e.target.value))}
-            className="px-3 py-2 border rounded-lg"
-          >
-            <option value="">All Projects</option>
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
-            ))}
-          </select>
-          <select value={filter} onChange={e => setFilter(e.target.value)} className="px-3 py-2 border rounded-lg">
-            <option value="all">All Categories</option>
-            <option value="Engineering">Engineering</option>
-            <option value="Permit">Permit</option>
-            <option value="Contract">Contract</option>
-            <option value="Photo">Photo</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Type</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Category</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Rev</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filteredDocs.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No documents found</td></tr>
-            ) : (
-              filteredDocs.map(doc => (
-                <tr key={doc.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{doc.Name}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{doc.Type}</td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">{doc.Category}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      doc.Status === 'Approved' ? 'bg-green-100 text-green-700' :
-                      doc.Status === 'In Review' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-gray-100 text-gray-700'
-                    }`}>{doc.Status || 'Draft'}</span>
-                  </td>
-                  <td className="px-4 py-3 text-sm">{doc['Current Rev'] || 1}</td>
-                  <td className="px-4 py-3">
-                    {doc['File URL'] && (
-                      <a href={doc['File URL']} target="_blank" rel="noopener noreferrer"
-                         className="text-blue-600 hover:underline text-sm">View</a>
-                    )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DEVIATIONS VIEW - Change Orders & Deviations
-// ══════════════════════════════════════════════════════════════════════════════
-function DeviationsView({ projects, onEdit }) {
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Deviations & Change Orders</h1>
-        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
-          <Plus className="w-4 h-4" /> New Deviation
-        </button>
-      </div>
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-        <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>Deviations tracking coming soon</p>
-        <p className="text-sm mt-2">This view will show change orders and deviations linked to projects</p>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SAGE IMPORT VIEW - Accounting Integration
-// ══════════════════════════════════════════════════════════════════════════════
-function SageImportView({ projects, onImportComplete }) {
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Sage Import</h1>
-      </div>
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
-        <Upload className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>Sage accounting import coming soon</p>
-        <p className="text-sm mt-2">Upload CSV exports from Sage to sync actuals</p>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// PROJECT BUDGET VIEW - Individual Project Financials
-// ══════════════════════════════════════════════════════════════════════════════
-function ProjectBudgetView({ projects, actuals }) {
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const selectedProject = projects.find(p => p.id === selectedProjectId) || projects[0];
-
-  const projectActuals = actuals.filter(a => a.Project?.includes(selectedProject?.id));
-  const totalActuals = projectActuals.reduce((sum, a) => sum + (a.Amount || 0), 0);
-  const budget = selectedProject?.['MFG Budget'] || 0;
-  const variance = budget - totalActuals;
-
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Project Budget</h1>
-        <select
-          value={selectedProjectId || ''}
-          onChange={e => setSelectedProjectId(e.target.value)}
-          className="px-3 py-2 border rounded-lg"
-        >
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
-          ))}
-        </select>
-      </div>
-
-      {selectedProject && (
-        <>
-          <div className="grid grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-sm text-gray-500">Contract Value</p>
-              <p className="text-2xl font-bold text-blue-600">${(selectedProject['Contract Value'] || 0).toLocaleString()}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-sm text-gray-500">MFG Budget</p>
-              <p className="text-2xl font-bold text-gray-800">${budget.toLocaleString()}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-sm text-gray-500">Actuals to Date</p>
-              <p className="text-2xl font-bold text-orange-600">${totalActuals.toLocaleString()}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-sm text-gray-500">Variance</p>
-              <p className={`text-2xl font-bold ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                ${variance.toLocaleString()}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-4 py-3 border-b font-medium">Actuals</div>
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Date</th>
-                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Description</th>
-                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
-                  <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {projectActuals.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No actuals recorded</td></tr>
-                ) : (
-                  projectActuals.map(a => (
-                    <tr key={a.id}>
-                      <td className="px-4 py-2 text-sm">{a.Date}</td>
-                      <td className="px-4 py-2">{a.Description}</td>
-                      <td className="px-4 py-2 text-sm text-gray-600">{a.Category}</td>
-                      <td className="px-4 py-2 text-right font-medium">${(a.Amount || 0).toLocaleString()}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// Continue in Part 3 with Drawings, Deviations, Sage Import, Customer Portal, and Main App
 
 // CUSTOMER PORTAL VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2417,25 +2133,24 @@ export default function App() {
   useEffect(() => { loadData(); }, []);
 
   const handleSaveProject = async (formData, existingId) => {
-    // Filter out fields that cause issues with Airtable
-    const safeFields = { ...formData };
-    delete safeFields['Project Manager']; // Collaborator field - can't update with text
-    delete safeFields['MFG Status']; // Options don't match - use MFG Stage instead
-
-    // Remove empty string values
-    Object.keys(safeFields).forEach(key => {
-      if (safeFields[key] === '') delete safeFields[key];
-    });
-
-    if (existingId) {
-      const updated = await airtableAPI.updateProject(existingId, safeFields);
-      setProjects(prev => prev.map(p => p.id === existingId ? updated : p));
-    } else {
-      const created = await airtableAPI.createProject(safeFields);
-      setProjects(prev => [...prev, created]);
+    try {
+      if (existingId) {
+        console.log('Updating project:', existingId, formData);
+        const updated = await airtableAPI.updateProject(existingId, formData);
+        console.log('Update response:', updated);
+        setProjects(prev => prev.map(p => p.id === existingId ? { ...p, ...updated } : p));
+      } else {
+        console.log('Creating project:', formData);
+        const created = await airtableAPI.createProject(formData);
+        console.log('Create response:', created);
+        setProjects(prev => [...prev, created]);
+      }
+      setEditingProject(null);
+      setShowForm(false);
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Failed to save: ' + err.message);
     }
-    setEditingProject(null);
-    setShowForm(false);
   };
 
   const handleDeleteProject = async (id) => {
@@ -2464,7 +2179,7 @@ export default function App() {
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
       case 'budget': return <BudgetView projects={projects} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
-      case 'pl': return <PLView projects={projects} onUpdateProject={handleSaveProject} />;
+      case 'pl': return <PLView projects={projects} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
       case 'deviations': return <DeviationsView projects={projects} onEdit={handleEdit} />;
       case 'sage': return <SageImportView projects={projects} onImportComplete={loadData} />;
