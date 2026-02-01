@@ -60,6 +60,10 @@ const airtableAPI = {
       body: JSON.stringify({ fields })
     });
     const data = await res.json();
+    if (data.error) {
+      console.error('Airtable update error:', data.error);
+      throw new Error(data.error.message || 'Failed to update project');
+    }
     return { id: data.id, ...data.fields };
   },
   async deleteProject(id) {
@@ -2122,11 +2126,21 @@ export default function App() {
   useEffect(() => { loadData(); }, []);
 
   const handleSaveProject = async (formData, existingId) => {
+    // Filter out fields that cause issues with Airtable
+    const safeFields = { ...formData };
+    delete safeFields['Project Manager']; // Collaborator field - can't update with text
+    delete safeFields['MFG Status']; // Options don't match - use MFG Stage instead
+
+    // Remove empty string values
+    Object.keys(safeFields).forEach(key => {
+      if (safeFields[key] === '') delete safeFields[key];
+    });
+
     if (existingId) {
-      const updated = await airtableAPI.updateProject(existingId, formData);
+      const updated = await airtableAPI.updateProject(existingId, safeFields);
       setProjects(prev => prev.map(p => p.id === existingId ? updated : p));
     } else {
-      const created = await airtableAPI.createProject(formData);
+      const created = await airtableAPI.createProject(safeFields);
       setProjects(prev => [...prev, created]);
     }
     setEditingProject(null);
