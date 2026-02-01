@@ -1730,7 +1730,215 @@ function PLView({ projects }) {
 }
 
 // END OF PART 2
-// Continue in Part 3 with Drawings, Deviations, Sage Import, Customer Portal, and Main App
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DRAWINGS VIEW - Document Control
+// ══════════════════════════════════════════════════════════════════════════════
+function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const projectDocs = selectedProject
+    ? documents.filter(d => d.Project?.includes(selectedProject.id))
+    : documents;
+
+  const filteredDocs = filter === 'all'
+    ? projectDocs
+    : projectDocs.filter(d => d.Category === filter);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Drawings & Documents</h1>
+        <div className="flex gap-4">
+          <select
+            value={selectedProject?.id || ''}
+            onChange={e => setSelectedProject(projects.find(p => p.id === e.target.value))}
+            className="px-3 py-2 border rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+            ))}
+          </select>
+          <select value={filter} onChange={e => setFilter(e.target.value)} className="px-3 py-2 border rounded-lg">
+            <option value="all">All Categories</option>
+            <option value="Engineering">Engineering</option>
+            <option value="Permit">Permit</option>
+            <option value="Contract">Contract</option>
+            <option value="Photo">Photo</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Type</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Category</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Rev</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filteredDocs.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No documents found</td></tr>
+            ) : (
+              filteredDocs.map(doc => (
+                <tr key={doc.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{doc.Name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{doc.Type}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">{doc.Category}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      doc.Status === 'Approved' ? 'bg-green-100 text-green-700' :
+                      doc.Status === 'In Review' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{doc.Status || 'Draft'}</span>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{doc['Current Rev'] || 1}</td>
+                  <td className="px-4 py-3">
+                    {doc['File URL'] && (
+                      <a href={doc['File URL']} target="_blank" rel="noopener noreferrer"
+                         className="text-blue-600 hover:underline text-sm">View</a>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEVIATIONS VIEW - Change Orders & Deviations
+// ══════════════════════════════════════════════════════════════════════════════
+function DeviationsView({ projects, onEdit }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Deviations & Change Orders</h1>
+        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          <Plus className="w-4 h-4" /> New Deviation
+        </button>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Deviations tracking coming soon</p>
+        <p className="text-sm mt-2">This view will show change orders and deviations linked to projects</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SAGE IMPORT VIEW - Accounting Integration
+// ══════════════════════════════════════════════════════════════════════════════
+function SageImportView({ projects, onImportComplete }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Sage Import</h1>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <Upload className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Sage accounting import coming soon</p>
+        <p className="text-sm mt-2">Upload CSV exports from Sage to sync actuals</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROJECT BUDGET VIEW - Individual Project Financials
+// ══════════════════════════════════════════════════════════════════════════════
+function ProjectBudgetView({ projects, actuals }) {
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const selectedProject = projects.find(p => p.id === selectedProjectId) || projects[0];
+
+  const projectActuals = actuals.filter(a => a.Project?.includes(selectedProject?.id));
+  const totalActuals = projectActuals.reduce((sum, a) => sum + (a.Amount || 0), 0);
+  const budget = selectedProject?.['MFG Budget'] || 0;
+  const variance = budget - totalActuals;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Project Budget</h1>
+        <select
+          value={selectedProjectId || ''}
+          onChange={e => setSelectedProjectId(e.target.value)}
+          className="px-3 py-2 border rounded-lg"
+        >
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+          ))}
+        </select>
+      </div>
+
+      {selectedProject && (
+        <>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Contract Value</p>
+              <p className="text-2xl font-bold text-blue-600">${(selectedProject['Contract Value'] || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">MFG Budget</p>
+              <p className="text-2xl font-bold text-gray-800">${budget.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Actuals to Date</p>
+              <p className="text-2xl font-bold text-orange-600">${totalActuals.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Variance</p>
+              <p className={`text-2xl font-bold ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                ${variance.toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-4 py-3 border-b font-medium">Actuals</div>
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Date</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Description</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
+                  <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectActuals.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No actuals recorded</td></tr>
+                ) : (
+                  projectActuals.map(a => (
+                    <tr key={a.id}>
+                      <td className="px-4 py-2 text-sm">{a.Date}</td>
+                      <td className="px-4 py-2">{a.Description}</td>
+                      <td className="px-4 py-2 text-sm text-gray-600">{a.Category}</td>
+                      <td className="px-4 py-2 text-right font-medium">${(a.Amount || 0).toLocaleString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // CUSTOMER PORTAL VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
