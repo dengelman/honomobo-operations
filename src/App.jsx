@@ -507,7 +507,7 @@ function WIPScheduleView({ projects }) {
 
   const buildWipData = (projects) => {
     return projects
-      .filter(p => ['Production', 'Logistics', 'D&E', 'Permitting'].includes(p.Stage))
+      .filter(p => ['Production', 'Logistics'].includes(p.Stage))
       .map(p => {
         const currentWip = calculateWipFromProject(p);
         const currentMonth = new Date().getMonth(); // 0 = Jan
