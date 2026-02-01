@@ -119,18 +119,20 @@ const BAY_MAP = {
 };
 
 const MFG_STATUS_TO_STAGE = {
-  'Fabrication': 'fabrication', 'Steel Frame': 'fabrication',
-  'Rough-In': 'rough_in', 'Rough MEP': 'rough_in', 'Insulation': 'rough_in',
-  'Finishing': 'finishing', 'Interior Finish': 'finishing',
-  'Final': 'final', 'Final QC': 'final',
+  'Fab Complete': 'fab_complete', 'Fabrication Complete': 'fab_complete', 'Fabrication': 'fab_complete',
+  'Framing Complete': 'framing_complete', 'Framing': 'framing_complete',
+  'Mech Rough Ins Complete': 'mech_rough_in', 'Mech Rough-In': 'mech_rough_in', 'MEP Rough-In': 'mech_rough_in', 'Rough-In': 'mech_rough_in',
+  'Drywall Complete': 'drywall_complete', 'Drywall': 'drywall_complete',
+  'Final QC': 'final_qc', 'Final': 'final_qc', 'QC': 'final_qc',
   'Ready to Ship': 'ready', 'Ready': 'ready',
 };
 
 const MFG_STATUS_TO_WEEK = {
-  'Fabrication': 2, 'Steel Frame': 2,
-  'Rough-In': 4, 'Rough MEP': 4, 'Insulation': 5,
-  'Finishing': 8, 'Interior Finish': 8,
-  'Final': 10, 'Final QC': 10,
+  'Fab Complete': 2, 'Fabrication Complete': 2, 'Fabrication': 2,
+  'Framing Complete': 4, 'Framing': 4,
+  'Mech Rough Ins Complete': 6, 'Mech Rough-In': 6, 'MEP Rough-In': 6, 'Rough-In': 6,
+  'Drywall Complete': 9, 'Drywall': 9,
+  'Final QC': 11, 'Final': 11, 'QC': 11,
   'Ready to Ship': 12, 'Ready': 12,
 };
 
@@ -184,7 +186,7 @@ function ProjectFormModal({ project, onSave, onClose }) {
   const [saving, setSaving] = useState(false);
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const positions = ['', ...POSITION_IDS];
-  const mfgStatuses = ['', 'Fabrication', 'Rough-In', 'Insulation', 'Finishing', 'Final QC', 'Ready to Ship'];
+  const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
   const pms = ['', 'Sarah Chen', 'Nicole Murray', 'Ryan Sieben'];
 
   const handleSubmit = async (e) => {
@@ -1191,10 +1193,11 @@ function ProductionSchedulerView({ projects }) {
 // PRODUCTION BOARD VIEW
 // ══════════════════════════════════════════════════════════════════════════════
 const PROD_STAGES = [
-  { id: 'fabrication', name: 'Fabrication', color: '#3B82F6' },
-  { id: 'rough_in', name: 'Rough-In', color: '#F59E0B' },
-  { id: 'finishing', name: 'Finishing', color: '#8B5CF6' },
-  { id: 'final', name: 'Final QC', color: '#10B981' },
+  { id: 'fab_complete', name: 'Fab Complete', color: '#3B82F6' },
+  { id: 'framing_complete', name: 'Framing Complete', color: '#8B5CF6' },
+  { id: 'mech_rough_in', name: 'Mech Rough Ins', color: '#F59E0B' },
+  { id: 'drywall_complete', name: 'Drywall Complete', color: '#EC4899' },
+  { id: 'final_qc', name: 'Final QC', color: '#10B981' },
   { id: 'ready', name: 'Ready to Ship', color: '#06B6D4' }
 ];
 
@@ -1969,8 +1972,24 @@ function CustomerPortalView({ projects, documents, payments }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
-const navItems = [
+// ══════════════════════════════════════════════════════════════════════════════
+// ROLE-BASED ACCESS CONTROL
+// ══════════════════════════════════════════════════════════════════════════════
+const ROLES = {
+  admin: { name: 'Admin', description: 'Full access to all views', color: '#EF4444' },
+  de_manager: { name: 'D&E Manager', description: 'Design & Engineering oversight', color: '#3B82F6' },
+  pm: { name: 'Project Manager', description: 'Project management views', color: '#10B981' },
+  factory: { name: 'Factory Floor', description: 'Manufacturing views', color: '#F59E0B' },
+  qc: { name: 'QC Team', description: 'Quality control views', color: '#8B5CF6' },
+  finance: { name: 'Finance', description: 'Financial views', color: '#06B6D4' },
+  customer: { name: 'Customer', description: 'Customer portal only', color: '#EC4899' },
+};
+
+const allNavItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'investor', label: 'Investor Dashboard', icon: TrendingUp },
+  { id: 'pipeline', label: 'Pipeline Analytics', icon: PieChart },
+  { id: 'kpi', label: 'KPI Scorecard', icon: BarChart3 },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
   { id: 'jobs', label: 'Job Schedule', icon: Calendar },
   { id: 'scheduler', label: 'Production Scheduler', icon: Factory },
@@ -1985,8 +2004,73 @@ const navItems = [
   { id: 'portal', label: 'Customer Portal', icon: User },
 ];
 
+const ROLE_ACCESS = {
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'jobs', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  de_manager: ['dashboard', 'pipeline', 'kpi', 'jobs', 'drawings', 'deviations'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'jobs', 'scheduler', 'drawings', 'projectbudget', 'portal'],
+  factory: ['floor', 'board', 'scheduler'],
+  qc: ['floor', 'board', 'drawings'],
+  finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'budget', 'projectbudget', 'pl', 'sage', 'deviations'],
+  customer: ['portal'],
+};
+
+const getNavItemsForRole = (role) => {
+  const allowedViews = ROLE_ACCESS[role] || [];
+  return allNavItems.filter(item => allowedViews.includes(item.id));
+};
+
+const getDefaultViewForRole = (role) => {
+  const allowed = ROLE_ACCESS[role] || [];
+  return allowed[0] || 'dashboard';
+};
+
+// Role Selector Component
+function RoleSelector({ currentRole, onRoleChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const role = ROLES[currentRole];
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-white hover:bg-gray-50 transition-colors"
+      >
+        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: role.color }} />
+        <span className="text-sm font-medium">{role.name}</span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-lg border z-50 overflow-hidden">
+            <div className="px-4 py-2 bg-gray-50 border-b">
+              <span className="text-xs font-semibold text-gray-500 uppercase">Switch Role</span>
+            </div>
+            {Object.entries(ROLES).map(([roleId, roleData]) => (
+              <button
+                key={roleId}
+                onClick={() => { onRoleChange(roleId); setIsOpen(false); }}
+                className={`w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors ${currentRole === roleId ? 'bg-blue-50' : ''}`}
+              >
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: roleData.color }} />
+                <div className="text-left">
+                  <div className="font-medium text-gray-900">{roleData.name}</div>
+                  <div className="text-xs text-gray-500">{roleData.description}</div>
+                </div>
+                {currentRole === roleId && <Check className="w-4 h-4 text-blue-600 ml-auto" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  const [view, setView] = useState('dashboard');
+  const [role, setRole] = useState(() => localStorage.getItem('honomobo_role') || 'admin');
+  const [view, setView] = useState(() => getDefaultViewForRole(localStorage.getItem('honomobo_role') || 'admin'));
   const [projects, setProjects] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -1996,6 +2080,23 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [showForm, setShowForm] = useState(false);
+
+  const navItems = getNavItemsForRole(role);
+
+  const handleRoleChange = (newRole) => {
+    setRole(newRole);
+    localStorage.setItem('honomobo_role', newRole);
+    const defaultView = getDefaultViewForRole(newRole);
+    setView(defaultView);
+  };
+
+  // Check if current view is allowed for role, if not switch to default
+  useEffect(() => {
+    const allowed = ROLE_ACCESS[role] || [];
+    if (!allowed.includes(view)) {
+      setView(getDefaultViewForRole(role));
+    }
+  }, [role, view]);
 
   const loadData = async () => {
     setLoading(true);
@@ -2048,6 +2149,9 @@ export default function App() {
   const renderView = () => {
     switch (view) {
       case 'dashboard': return <DashboardView projects={projects} onEdit={handleEdit} />;
+      case 'investor': return <InvestorDashboardView projects={projects} payments={payments} />;
+      case 'pipeline': return <PipelineAnalyticsView projects={projects} />;
+      case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
       case 'wip': return <WIPScheduleView projects={projects} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
       case 'scheduler': return <ProductionSchedulerView projects={projects} />;
@@ -2137,13 +2241,16 @@ export default function App() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <RoleSelector currentRole={role} onRoleChange={handleRoleChange} />
             <button onClick={loadData} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg" title="Refresh">
               <RefreshCw className="w-5 h-5" />
             </button>
-            <button onClick={() => { setEditingProject(null); setShowForm(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New Project</span>
-            </button>
+            {role !== 'customer' && (
+              <button onClick={() => { setEditingProject(null); setShowForm(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">New Project</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -2160,6 +2267,1276 @@ export default function App() {
           onClose={() => { setShowForm(false); setEditingProject(null); }}
         />
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KPI DASHBOARD VIEW - Auto-calculated from Airtable
+// ══════════════════════════════════════════════════════════════════════════════
+const KPI_DEFINITIONS = [
+  { id: 'concepts_signed', name: 'Concepts Signed', owner: 'Mark/Daniel', goal: 18, unit: 'mods', category: 'Sales' },
+  { id: 'concepts_completed', name: 'Concepts Completed (1st Draft)', owner: 'Paul', goal: 18, unit: 'mods', category: 'D&E' },
+  { id: 'de_contracts', name: 'D&E Contracts Signed', owner: 'Mark/Daniel', goal: 15, unit: 'mods', category: 'Sales' },
+  { id: 'mod_ifc', name: 'Mod IFC', owner: 'Nadine', goal: 15, unit: 'mods', category: 'D&E' },
+  { id: 'permits_submitted', name: 'Site Permits Submitted', owner: 'Ryan', goal: 15, unit: 'mods', category: 'Permitting' },
+  { id: 'permits_approved', name: 'Site Permits Approved', owner: 'Ryan', goal: 15, unit: 'mods', category: 'Permitting' },
+  { id: 'deposits', name: 'Deposits Received', owner: 'Mark/Daniel', goal: 13, unit: 'mods', category: 'Sales' },
+  { id: 'sales_margin', name: 'Sales (Gross Margin)', owner: 'Mark/Daniel', goal: 500000, unit: '$', category: 'Sales' },
+  { id: 'fab_complete', name: 'Fab Complete', owner: 'Tanner', goal: 13, unit: 'mods', category: 'MFG' },
+  { id: 'drywall_complete', name: 'Drywall Complete', owner: 'Greg', goal: 13, unit: 'mods', category: 'MFG' },
+  { id: 'invoicing_mfg', name: 'Invoicing Value (MFG)', owner: 'Nathan', goal: 1600000, unit: '$', category: 'Finance', manual: true },
+  { id: 'invoicing_corp', name: 'Invoicing Value (CORP)', owner: 'Nathan', goal: 400000, unit: '$', category: 'Finance', manual: true },
+  { id: 'cash_collected', name: 'Cash Collected', owner: 'Nathan', goal: 2000000, unit: '$', category: 'Finance' },
+];
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function KPIDashboardView({ projects, payments }) {
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [drilldownKpi, setDrilldownKpi] = useState(null);
+
+  // Helper: Check if date is in selected month/year
+  const isInMonth = (dateStr, month, year) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getMonth() === month && d.getFullYear() === year;
+  };
+
+  // Helper: Get mod count from project (default 1 if not set)
+  const getModCount = (p) => parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
+
+  // Calculate KPI values from real data
+  const calculateKpiValues = useMemo(() => {
+    const values = {};
+    const details = {}; // Store which projects contributed
+
+    // Concepts Signed - Stage = Concept, signed this month
+    const conceptsSigned = projects.filter(p => 
+      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], selectedMonth, selectedYear)
+    );
+    values.concepts_signed = conceptsSigned.reduce((sum, p) => sum + getModCount(p), 0);
+    details.concepts_signed = conceptsSigned;
+
+    // Concepts Completed
+    const conceptsCompleted = projects.filter(p => 
+      isInMonth(p['Concept Complete Date'], selectedMonth, selectedYear)
+    );
+    values.concepts_completed = conceptsCompleted.reduce((sum, p) => sum + getModCount(p), 0);
+    details.concepts_completed = conceptsCompleted;
+
+    // D&E Contracts Signed
+    const deContracts = projects.filter(p => 
+      (p.Stage === 'D&E' || p.Stage === 'Permitting' || p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Complete') &&
+      isInMonth(p['D&E Signed Date'], selectedMonth, selectedYear)
+    );
+    values.de_contracts = deContracts.reduce((sum, p) => sum + getModCount(p), 0);
+    details.de_contracts = deContracts;
+
+    // Mod IFC
+    const modIfc = projects.filter(p => isInMonth(p['IFC Date'], selectedMonth, selectedYear));
+    values.mod_ifc = modIfc.reduce((sum, p) => sum + getModCount(p), 0);
+    details.mod_ifc = modIfc;
+
+    // Permits Submitted
+    const permitsSubmitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], selectedMonth, selectedYear));
+    values.permits_submitted = permitsSubmitted.reduce((sum, p) => sum + getModCount(p), 0);
+    details.permits_submitted = permitsSubmitted;
+
+    // Permits Approved
+    const permitsApproved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
+    values.permits_approved = permitsApproved.reduce((sum, p) => sum + getModCount(p), 0);
+    details.permits_approved = permitsApproved;
+
+    // Deposits Received (from Payments table)
+    const depositsReceived = (payments || []).filter(p => 
+      (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
+      p['Status'] === 'Paid' &&
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+    );
+    // For deposits, count related projects' mods
+    values.deposits = depositsReceived.length; // Simplified - could enhance with mod count
+    details.deposits = depositsReceived;
+
+    // Sales (Gross Margin) - Sum of Gross Margin for D&E contracts signed this month
+    values.sales_margin = deContracts.reduce((sum, p) => sum + (p['Gross Margin'] || 0), 0);
+    details.sales_margin = deContracts;
+
+    // Fab Complete
+    const fabComplete = projects.filter(p => isInMonth(p['Fab Complete Date'], selectedMonth, selectedYear));
+    values.fab_complete = fabComplete.reduce((sum, p) => sum + getModCount(p), 0);
+    details.fab_complete = fabComplete;
+
+    // Drywall Complete
+    const drywallComplete = projects.filter(p => isInMonth(p['Drywall Complete Date'], selectedMonth, selectedYear));
+    values.drywall_complete = drywallComplete.reduce((sum, p) => sum + getModCount(p), 0);
+    details.drywall_complete = drywallComplete;
+
+    // Invoicing - Manual for now
+    values.invoicing_mfg = null;
+    values.invoicing_corp = null;
+    details.invoicing_mfg = [];
+    details.invoicing_corp = [];
+
+    // Cash Collected
+    const cashCollected = (payments || []).filter(p => 
+      p['Status'] === 'Paid' &&
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
+    );
+    values.cash_collected = cashCollected.reduce((sum, p) => sum + (p['Amount'] || 0), 0);
+    details.cash_collected = cashCollected;
+
+    return { values, details };
+  }, [projects, payments, selectedMonth, selectedYear]);
+
+  // Calculate historical data for sparklines (last 6 months)
+  const historicalData = useMemo(() => {
+    const history = {};
+    KPI_DEFINITIONS.forEach(kpi => { history[kpi.id] = []; });
+
+    for (let i = 5; i >= 0; i--) {
+      let m = selectedMonth - i;
+      let y = selectedYear;
+      if (m < 0) { m += 12; y -= 1; }
+
+      // Simplified historical calc - just for current month data
+      // In production, you'd want to recalculate for each month
+      KPI_DEFINITIONS.forEach(kpi => {
+        if (i === 0) {
+          history[kpi.id].push(calculateKpiValues.values[kpi.id] || 0);
+        } else {
+          // Placeholder - would need actual historical data
+          history[kpi.id].push(null);
+        }
+      });
+    }
+    return history;
+  }, [calculateKpiValues, selectedMonth, selectedYear]);
+
+  const getStatusColor = (value, goal) => {
+    if (value === null) return 'gray';
+    const pct = (value / goal) * 100;
+    if (pct >= 100) return 'emerald';
+    if (pct >= 80) return 'amber';
+    return 'red';
+  };
+
+  const formatValue = (value, unit) => {
+    if (value === null) return '—';
+    if (unit === '$') return formatCurrency(value);
+    return value.toLocaleString();
+  };
+
+  const categories = ['all', ...new Set(KPI_DEFINITIONS.map(k => k.category))];
+  const filteredKpis = categoryFilter === 'all' 
+    ? KPI_DEFINITIONS 
+    : KPI_DEFINITIONS.filter(k => k.category === categoryFilter);
+
+  const summary = useMemo(() => {
+    let onTrack = 0, atRisk = 0, behind = 0;
+    KPI_DEFINITIONS.forEach(kpi => {
+      const val = calculateKpiValues.values[kpi.id];
+      if (val === null) return;
+      const pct = (val / kpi.goal) * 100;
+      if (pct >= 100) onTrack++;
+      else if (pct >= 80) atRisk++;
+      else behind++;
+    });
+    return { onTrack, atRisk, behind };
+  }, [calculateKpiValues]);
+
+  // Sparkline component
+  const Sparkline = ({ data, color }) => {
+    const max = Math.max(...data.filter(d => d !== null), 1);
+    const width = 60;
+    const height = 20;
+    const validData = data.map(d => d === null ? 0 : d);
+    const points = validData.map((v, i) => `${(i / (validData.length - 1)) * width},${height - (v / max) * height}`).join(' ');
+    
+    return (
+      <svg width={width} height={height} className="inline-block">
+        <polyline fill="none" stroke={color} strokeWidth="1.5" points={points} />
+      </svg>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">KPI Scorecard</h2>
+          <p className="text-sm text-gray-500">
+            EOS 2025 Metrics • <span className="text-blue-600 font-medium">Auto-calculated from Airtable</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select 
+            value={selectedMonth} 
+            onChange={e => setSelectedMonth(parseInt(e.target.value))}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </select>
+          <select 
+            value={selectedYear} 
+            onChange={e => setSelectedYear(parseInt(e.target.value))}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            <option value={2025}>2025</option>
+            <option value={2026}>2026</option>
+          </select>
+          <select 
+            value={categoryFilter} 
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            {categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Total KPIs</div>
+          <div className="text-3xl font-bold">{KPI_DEFINITIONS.length}</div>
+        </div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">On Track (≥100%)</div>
+          <div className="text-3xl font-bold text-emerald-600">{summary.onTrack}</div>
+        </div>
+        <div className="bg-amber-50 border-amber-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">At Risk (80-99%)</div>
+          <div className="text-3xl font-bold text-amber-600">{summary.atRisk}</div>
+        </div>
+        <div className="bg-red-50 border-red-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Behind (&lt;80%)</div>
+          <div className="text-3xl font-bold text-red-600">{summary.behind}</div>
+        </div>
+      </div>
+
+      {/* KPI Table */}
+      <div className="bg-white rounded-xl border overflow-hidden">
+        <table className="min-w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">KPI</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Owner</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Goal</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actual</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">% to Goal</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Trend</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {filteredKpis.map(kpi => {
+              const value = calculateKpiValues.values[kpi.id];
+              const pct = value !== null ? Math.round((value / kpi.goal) * 100) : null;
+              const status = getStatusColor(value, kpi.goal);
+              const details = calculateKpiValues.details[kpi.id] || [];
+
+              return (
+                <tr key={kpi.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{kpi.name}</div>
+                    <div className="text-xs text-gray-500">{kpi.category}</div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{kpi.owner}</td>
+                  <td className="px-4 py-3 text-center text-sm">
+                    {kpi.unit === '$' ? formatCurrency(kpi.goal) : `${kpi.goal} ${kpi.unit}`}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <span className={`font-semibold ${value === null ? 'text-gray-400' : 'text-gray-900'}`}>
+                      {formatValue(value, kpi.unit)}
+                    </span>
+                    {kpi.manual && <span className="ml-1 text-xs text-gray-400">(manual)</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {pct !== null ? (
+                      <span className={`font-semibold ${pct >= 100 ? 'text-emerald-600' : pct >= 80 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {pct}%
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <div className={`inline-flex w-4 h-4 rounded-full ${
+                      status === 'emerald' ? 'bg-emerald-500' :
+                      status === 'amber' ? 'bg-amber-500' :
+                      status === 'red' ? 'bg-red-500' :
+                      'bg-gray-300'
+                    }`} />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Sparkline 
+                      data={historicalData[kpi.id]} 
+                      color={status === 'emerald' ? '#10B981' : status === 'amber' ? '#F59E0B' : '#EF4444'} 
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {details.length > 0 && (
+                      <button 
+                        onClick={() => setDrilldownKpi(drilldownKpi === kpi.id ? null : kpi.id)}
+                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      >
+                        {details.length} items
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Drilldown Panel */}
+      {drilldownKpi && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-blue-900">
+              {KPI_DEFINITIONS.find(k => k.id === drilldownKpi)?.name} - Details
+            </h3>
+            <button onClick={() => setDrilldownKpi(null)} className="text-blue-600 hover:text-blue-800">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="bg-white rounded-lg border overflow-hidden">
+            <table className="min-w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Project</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Customer</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Model</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium text-gray-500">Mods</th>
+                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(calculateKpiValues.details[drilldownKpi] || []).slice(0, 10).map((item, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium">{item['Project ID'] || item['Name'] || '—'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{item['Status'] || item['Customer'] || '—'}</td>
+                    <td className="px-4 py-2 text-sm">{item['Model'] || item['Type'] || '—'}</td>
+                    <td className="px-4 py-2 text-center text-sm">{getModCount(item)}</td>
+                    <td className="px-4 py-2 text-right text-sm">{formatCurrency(item['Gross Margin'] || item['Amount'] || item['Contract Value'] || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Missing Fields Warning */}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <h3 className="font-semibold text-amber-900 mb-2 flex items-center gap-2">
+          <AlertCircle className="w-5 h-5" />
+          Fields Required for Auto-Tracking
+        </h3>
+        <p className="text-sm text-amber-700 mb-3">Add these date fields to your Projects table to enable automatic KPI tracking:</p>
+        <div className="grid grid-cols-3 gap-2 text-sm">
+          <div className="bg-white rounded p-2 border border-amber-200">Concept Signed Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Concept Complete Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">D&E Signed Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">IFC Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Permit Submitted Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Permit Approved Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Fab Complete Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Drywall Complete Date</div>
+          <div className="bg-white rounded p-2 border border-amber-200">Mod Count</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PIPELINE ANALYTICS VIEW
+// ══════════════════════════════════════════════════════════════════════════════
+const COUNTRY_MAP = {
+  'CA': 'Canada', 'AB': 'Canada', 'BC': 'Canada', 'ON': 'Canada', 'MB': 'Canada', 'QC': 'Canada',
+  'US': 'USA', 'USA': 'USA', 'WA': 'USA', 'CA_US': 'USA', 'CO': 'USA', 'HI': 'USA', 'NY': 'USA', 'OR': 'USA', 'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA',
+};
+
+const MARKET_DETAILS = {
+  'CA': { name: 'California', country: 'USA', icon: '🌴', color: '#F59E0B' },
+  'HI': { name: 'Hawaii', country: 'USA', icon: '🏝️', color: '#06B6D4' },
+  'CO': { name: 'Colorado', country: 'USA', icon: '🏔️', color: '#8B5CF6' },
+  'WA': { name: 'Washington', country: 'USA', icon: '🌲', color: '#10B981' },
+  'NY': { name: 'New York', country: 'USA', icon: '🗽', color: '#3B82F6' },
+  'OR': { name: 'Oregon', country: 'USA', icon: '🦆', color: '#84CC16' },
+  'OTHER_US': { name: 'Other US', country: 'USA', icon: '🇺🇸', color: '#6B7280' },
+  'AB': { name: 'Alberta', country: 'Canada', icon: '🍁', color: '#EF4444' },
+  'BC': { name: 'British Columbia', country: 'Canada', icon: '🌲', color: '#22C55E' },
+  'ON': { name: 'Ontario', country: 'Canada', icon: '🍁', color: '#EC4899' },
+};
+
+// Sales channels - California = Novare, Ontario = McLean, rest = Direct
+const SALES_CHANNELS = {
+  novare: { name: 'Novare (CA Dealer)', color: '#F59E0B', icon: '🏪' },
+  mclean: { name: 'McLean (ON Dealer)', color: '#EC4899', icon: '🏪' },
+  direct: { name: 'Direct Sale', color: '#3B82F6', icon: '🏠' },
+};
+
+const getSalesChannel = (market) => {
+  if (market === 'CA') return 'novare';
+  if (market === 'ON') return 'mclean';
+  return 'direct';
+};
+
+// Group minor US states into Other
+const normalizeMarket = (market) => {
+  if (['AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL'].includes(market)) return 'OTHER_US';
+  return market;
+};
+
+const MODEL_COLORS = {
+  'HO2': '#3B82F6',
+  'HO3': '#10B981', 
+  'HO4': '#F59E0B',
+  'HO5': '#8B5CF6',
+  'HS6': '#EC4899',
+  'HS8': '#06B6D4',
+  'SO1': '#EF4444',
+  'Other': '#6B7280',
+};
+
+function PipelineAnalyticsView({ projects }) {
+  const [stageFilter, setStageFilter] = useState('pipeline'); // pipeline, all, production
+
+  // Filter projects based on selection
+  const filteredProjects = useMemo(() => {
+    if (stageFilter === 'all') return projects;
+    if (stageFilter === 'production') return projects.filter(p => p.Stage === 'Production');
+    // Pipeline = everything except Complete
+    return projects.filter(p => p.Stage !== 'Complete');
+  }, [projects, stageFilter]);
+
+  // Get market from project
+  const getMarket = (p) => {
+    const state = p['Site State/Province'] || p['Market'] || '';
+    return normalizeMarket(state.toUpperCase());
+  };
+
+  // Get country from project
+  const getCountry = (p) => {
+    const rawMarket = (p['Site State/Province'] || p['Market'] || '').toUpperCase();
+    return COUNTRY_MAP[rawMarket] || 'Other';
+  };
+
+  // Get model type
+  const getModel = (p) => {
+    const model = p['Model'] || p['Unit Type'] || '';
+    const match = model.match(/(HO2|HO3|HO4|HO5|HS6|HS8|SO1)/i);
+    return match ? match[1].toUpperCase() : 'Other';
+  };
+
+  // Calculate all analytics
+  const analytics = useMemo(() => {
+    const data = {
+      total: { count: 0, value: 0, mods: 0 },
+      byCountry: {},
+      byMarket: {},
+      byModel: {},
+      byStage: {},
+      byChannel: {},
+    };
+
+    filteredProjects.forEach(p => {
+      const value = p['Contract Value'] || 0;
+      const mods = parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
+      const country = getCountry(p);
+      const market = getMarket(p);
+      const model = getModel(p);
+      const stage = p.Stage || 'Unknown';
+      const rawMarket = (p['Site State/Province'] || p['Market'] || '').toUpperCase();
+      const channel = getSalesChannel(rawMarket);
+
+      // Totals
+      data.total.count++;
+      data.total.value += value;
+      data.total.mods += mods;
+
+      // By Country
+      if (!data.byCountry[country]) data.byCountry[country] = { count: 0, value: 0, mods: 0 };
+      data.byCountry[country].count++;
+      data.byCountry[country].value += value;
+      data.byCountry[country].mods += mods;
+
+      // By Market
+      if (!data.byMarket[market]) data.byMarket[market] = { count: 0, value: 0, mods: 0 };
+      data.byMarket[market].count++;
+      data.byMarket[market].value += value;
+      data.byMarket[market].mods += mods;
+
+      // By Model
+      if (!data.byModel[model]) data.byModel[model] = { count: 0, value: 0, mods: 0 };
+      data.byModel[model].count++;
+      data.byModel[model].value += value;
+      data.byModel[model].mods += mods;
+
+      // By Stage
+      if (!data.byStage[stage]) data.byStage[stage] = { count: 0, value: 0, mods: 0 };
+      data.byStage[stage].count++;
+      data.byStage[stage].value += value;
+      data.byStage[stage].mods += mods;
+
+      // By Sales Channel
+      if (!data.byChannel[channel]) data.byChannel[channel] = { count: 0, value: 0, mods: 0 };
+      data.byChannel[channel].count++;
+      data.byChannel[channel].value += value;
+      data.byChannel[channel].mods += mods;
+    });
+
+    return data;
+  }, [filteredProjects]);
+
+  // Sort markets by value
+  const sortedMarkets = useMemo(() => {
+    return Object.entries(analytics.byMarket)
+      .map(([code, data]) => ({ code, ...data, details: MARKET_DETAILS[code] || { name: code, icon: '📍', color: '#6B7280' } }))
+      .sort((a, b) => b.value - a.value);
+  }, [analytics]);
+
+  // Sort models by count
+  const sortedModels = useMemo(() => {
+    return Object.entries(analytics.byModel)
+      .map(([model, data]) => ({ model, ...data, color: MODEL_COLORS[model] || '#6B7280' }))
+      .sort((a, b) => b.count - a.count);
+  }, [analytics]);
+
+  // Stage order
+  const stageOrder = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
+  const sortedStages = useMemo(() => {
+    return stageOrder
+      .filter(s => analytics.byStage[s])
+      .map(s => ({ stage: s, ...analytics.byStage[s] }));
+  }, [analytics]);
+
+  // Simple pie chart component
+  const PieChart = ({ data, colorKey, labelKey, valueKey }) => {
+    const total = data.reduce((sum, d) => sum + d[valueKey], 0);
+    let currentAngle = 0;
+    
+    const segments = data.map((d, i) => {
+      const percentage = d[valueKey] / total;
+      const angle = percentage * 360;
+      const startAngle = currentAngle;
+      currentAngle += angle;
+      
+      const startRad = (startAngle - 90) * Math.PI / 180;
+      const endRad = (startAngle + angle - 90) * Math.PI / 180;
+      const largeArc = angle > 180 ? 1 : 0;
+      
+      const x1 = 50 + 40 * Math.cos(startRad);
+      const y1 = 50 + 40 * Math.sin(startRad);
+      const x2 = 50 + 40 * Math.cos(endRad);
+      const y2 = 50 + 40 * Math.sin(endRad);
+      
+      const path = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
+      
+      return { ...d, path, percentage };
+    });
+
+    return (
+      <div className="flex items-center gap-6">
+        <svg viewBox="0 0 100 100" className="w-40 h-40">
+          {segments.map((seg, i) => (
+            <path key={i} d={seg.path} fill={seg[colorKey]} className="hover:opacity-80 transition-opacity cursor-pointer" />
+          ))}
+        </svg>
+        <div className="space-y-1">
+          {segments.map((seg, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded" style={{ backgroundColor: seg[colorKey] }} />
+              <span className="text-gray-700">{seg[labelKey]}</span>
+              <span className="text-gray-400">({Math.round(seg.percentage * 100)}%)</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Bar chart component
+  const BarChart = ({ data, labelKey, valueKey, colorKey, maxValue }) => {
+    const max = maxValue || Math.max(...data.map(d => d[valueKey]));
+    return (
+      <div className="space-y-2">
+        {data.map((d, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className="w-24 text-sm text-gray-600 truncate">{d[labelKey]}</div>
+            <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full rounded-full transition-all" 
+                style={{ width: `${(d[valueKey] / max) * 100}%`, backgroundColor: d[colorKey] || '#3B82F6' }} 
+              />
+            </div>
+            <div className="w-20 text-sm text-right font-medium">{formatCurrency(d[valueKey])}</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const usaData = analytics.byCountry['USA'] || { count: 0, value: 0, mods: 0 };
+  const canadaData = analytics.byCountry['Canada'] || { count: 0, value: 0, mods: 0 };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Pipeline Analytics</h2>
+          <p className="text-sm text-gray-500">
+            {filteredProjects.length} projects • {analytics.total.mods} mods • <span className="text-blue-600 font-medium">Live from Airtable</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select 
+            value={stageFilter} 
+            onChange={e => setStageFilter(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="pipeline">Active Pipeline (excl. Complete)</option>
+            <option value="production">Production Only</option>
+            <option value="all">All Projects</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Top Stats */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border p-5">
+          <div className="text-sm text-gray-500 mb-1">Total Pipeline Value</div>
+          <div className="text-3xl font-bold">{formatCurrency(analytics.total.value)}</div>
+          <div className="text-sm text-gray-400 mt-1">{analytics.total.count} projects</div>
+        </div>
+        <div className="bg-blue-50 border-blue-200 rounded-xl border p-5">
+          <div className="text-sm text-gray-500 mb-1">🇺🇸 USA</div>
+          <div className="text-3xl font-bold text-blue-600">{formatCurrency(usaData.value)}</div>
+          <div className="text-sm text-gray-400 mt-1">{usaData.count} projects • {usaData.mods} mods</div>
+        </div>
+        <div className="bg-red-50 border-red-200 rounded-xl border p-5">
+          <div className="text-sm text-gray-500 mb-1">🇨🇦 Canada</div>
+          <div className="text-3xl font-bold text-red-600">{formatCurrency(canadaData.value)}</div>
+          <div className="text-sm text-gray-400 mt-1">{canadaData.count} projects • {canadaData.mods} mods</div>
+        </div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-5">
+          <div className="text-sm text-gray-500 mb-1">Total Mods</div>
+          <div className="text-3xl font-bold text-emerald-600">{analytics.total.mods}</div>
+          <div className="text-sm text-gray-400 mt-1">Avg {(analytics.total.value / analytics.total.mods || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}/mod</div>
+        </div>
+      </div>
+
+      {/* Sales Channel, Country Split, Unit Type */}
+      <div className="grid grid-cols-3 gap-6">
+        {/* Sales Channel */}
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">By Sales Channel</h3>
+          <div className="space-y-4">
+            {Object.entries(SALES_CHANNELS).map(([channelId, channel]) => {
+              const data = analytics.byChannel[channelId] || { count: 0, value: 0, mods: 0 };
+              const pct = analytics.total.value > 0 ? (data.value / analytics.total.value) * 100 : 0;
+              return (
+                <div key={channelId}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium flex items-center gap-2">
+                      <span>{channel.icon}</span>
+                      {channel.name}
+                    </span>
+                    <span className="text-sm text-gray-500">{Math.round(pct)}%</span>
+                  </div>
+                  <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: channel.color }} />
+                  </div>
+                  <div className="flex justify-between mt-1 text-xs text-gray-500">
+                    <span>{data.count} projects</span>
+                    <span>{formatCurrency(data.value)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* USA vs Canada */}
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">USA vs Canada</h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">🇺🇸 USA</span>
+                <span className="text-sm text-gray-500">{analytics.total.value > 0 ? Math.round((usaData.value / analytics.total.value) * 100) : 0}%</span>
+              </div>
+              <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 rounded-full" style={{ width: `${analytics.total.value > 0 ? (usaData.value / analytics.total.value) * 100 : 0}%` }} />
+              </div>
+              <div className="flex justify-between mt-1 text-xs text-gray-500">
+                <span>{usaData.count} projects • {usaData.mods} mods</span>
+                <span>{formatCurrency(usaData.value)}</span>
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">🇨🇦 Canada</span>
+                <span className="text-sm text-gray-500">{analytics.total.value > 0 ? Math.round((canadaData.value / analytics.total.value) * 100) : 0}%</span>
+              </div>
+              <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-red-500 rounded-full" style={{ width: `${analytics.total.value > 0 ? (canadaData.value / analytics.total.value) * 100 : 0}%` }} />
+              </div>
+              <div className="flex justify-between mt-1 text-xs text-gray-500">
+                <span>{canadaData.count} projects • {canadaData.mods} mods</span>
+                <span>{formatCurrency(canadaData.value)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Unit Type */}
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">By Unit Type</h3>
+          {sortedModels.length > 0 ? (
+            <PieChart 
+              data={sortedModels} 
+              colorKey="color" 
+              labelKey="model" 
+              valueKey="count" 
+            />
+          ) : (
+            <div className="text-center text-gray-400 py-8">No data</div>
+          )}
+        </div>
+      </div>
+
+      {/* Markets Breakdown */}
+      <div className="bg-white rounded-xl border p-5">
+        <h3 className="font-semibold text-gray-900 mb-4">Pipeline by Market</h3>
+        <div className="grid grid-cols-2 gap-8">
+          <div>
+            <h4 className="text-sm font-medium text-gray-500 mb-3">By Contract Value</h4>
+            <BarChart 
+              data={sortedMarkets.slice(0, 8).map(m => ({ ...m, label: `${m.details.icon} ${m.details.name}`, color: m.details.color }))} 
+              labelKey="label" 
+              valueKey="value" 
+              colorKey="color"
+            />
+          </div>
+          <div>
+            <h4 className="text-sm font-medium text-gray-500 mb-3">Market Share</h4>
+            <div className="space-y-3">
+              {sortedMarkets.slice(0, 8).map((m, i) => {
+                const pct = analytics.total.value > 0 ? (m.value / analytics.total.value) * 100 : 0;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-lg">{m.details.icon}</span>
+                    <div className="flex-1">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium">{m.details.name}</span>
+                        <span className="text-gray-500">{m.count} projects • {Math.round(pct)}%</span>
+                      </div>
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: m.details.color }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stage Breakdown */}
+      <div className="grid grid-cols-2 gap-6">
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Pipeline by Stage</h3>
+          <div className="space-y-3">
+            {sortedStages.map((s, i) => {
+              const pct = analytics.total.value > 0 ? (s.value / analytics.total.value) * 100 : 0;
+              const stageColors = {
+                'Assessment': '#9CA3AF',
+                'Concept': '#A78BFA',
+                'D&E': '#3B82F6',
+                'Permitting': '#F59E0B',
+                'Production': '#10B981',
+                'Logistics': '#06B6D4',
+                'Complete': '#6B7280',
+              };
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-24 text-sm font-medium">{s.stage}</div>
+                  <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: stageColors[s.stage] || '#6B7280' }} />
+                  </div>
+                  <div className="w-16 text-sm text-right">{s.count} proj</div>
+                  <div className="w-24 text-sm text-right font-medium">{formatCurrency(s.value)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Unit Type Breakdown</h3>
+          <table className="min-w-full">
+            <thead>
+              <tr className="text-xs text-gray-500 uppercase">
+                <th className="text-left pb-2">Model</th>
+                <th className="text-center pb-2">Projects</th>
+                <th className="text-center pb-2">Mods</th>
+                <th className="text-right pb-2">Value</th>
+                <th className="text-right pb-2">% of Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {sortedModels.map((m, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded" style={{ backgroundColor: m.color }} />
+                      <span className="font-medium">{m.model}</span>
+                    </div>
+                  </td>
+                  <td className="py-2 text-center">{m.count}</td>
+                  <td className="py-2 text-center">{m.mods}</td>
+                  <td className="py-2 text-right">{formatCurrency(m.value)}</td>
+                  <td className="py-2 text-right text-gray-500">{analytics.total.value > 0 ? Math.round((m.value / analytics.total.value) * 100) : 0}%</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2">
+              <tr className="font-semibold">
+                <td className="py-2">Total</td>
+                <td className="py-2 text-center">{analytics.total.count}</td>
+                <td className="py-2 text-center">{analytics.total.mods}</td>
+                <td className="py-2 text-right">{formatCurrency(analytics.total.value)}</td>
+                <td className="py-2 text-right">100%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INVESTOR DASHBOARD VIEW
+// ══════════════════════════════════════════════════════════════════════════════
+function InvestorDashboardView({ projects, payments }) {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth();
+  const currentYear = currentDate.getFullYear();
+
+  // Helper: Check if date is in a specific month/year
+  const isInMonth = (dateStr, month, year) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    return d.getMonth() === month && d.getFullYear() === year;
+  };
+
+  // Helper: Get month label
+  const getMonthLabel = (month, year) => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[month]} ${year}`;
+  };
+
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    const now = new Date();
+    const thisYear = now.getFullYear();
+    const lastYear = thisYear - 1;
+
+    // Pipeline metrics
+    const activePipeline = projects.filter(p => p.Stage !== 'Complete');
+    const pipelineValue = activePipeline.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
+    const pipelineMods = activePipeline.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
+
+    // Production metrics
+    const inProduction = projects.filter(p => p.Stage === 'Production');
+    const productionValue = inProduction.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
+
+    // Backlog (contracted but not yet in production)
+    const backlog = projects.filter(p => ['D&E', 'Permitting'].includes(p.Stage));
+    const backlogValue = backlog.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
+
+    // Completed this year
+    const completedThisYear = projects.filter(p => 
+      p.Stage === 'Complete' && 
+      p['Completion Date'] && 
+      new Date(p['Completion Date']).getFullYear() === thisYear
+    );
+    const completedValue = completedThisYear.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
+    const completedMods = completedThisYear.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
+
+    // Capacity utilization (18 positions)
+    const positionsUsed = inProduction.filter(p => p['Bay Assignment']).length;
+    const capacityUtilization = Math.round((positionsUsed / 18) * 100);
+
+    // Average contract value
+    const avgContractValue = activePipeline.length > 0 
+      ? pipelineValue / activePipeline.length 
+      : 0;
+
+    // Cash collected this year
+    const cashThisYear = (payments || [])
+      .filter(p => p['Status'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], currentMonth, currentYear))
+      .reduce((sum, p) => sum + (p['Amount'] || 0), 0);
+
+    // YTD cash
+    const ytdCash = (payments || [])
+      .filter(p => {
+        if (p['Status'] !== 'Paid') return false;
+        const d = new Date(p['Date'] || p['Paid Date']);
+        return d.getFullYear() === thisYear;
+      })
+      .reduce((sum, p) => sum + (p['Amount'] || 0), 0);
+
+    // By stage counts
+    const byStage = {};
+    projects.forEach(p => {
+      const stage = p.Stage || 'Unknown';
+      if (!byStage[stage]) byStage[stage] = { count: 0, value: 0 };
+      byStage[stage].count++;
+      byStage[stage].value += p['Contract Value'] || 0;
+    });
+
+    // Monthly data for charts (last 12 months)
+    const monthlyData = [];
+    for (let i = 11; i >= 0; i--) {
+      let m = currentMonth - i;
+      let y = currentYear;
+      if (m < 0) { m += 12; y -= 1; }
+      
+      // Contracts signed this month (D&E Signed Date)
+      const contractsSigned = projects.filter(p => isInMonth(p['D&E Signed Date'], m, y));
+      const contractsValue = contractsSigned.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
+      
+      // Cash collected this month
+      const cashCollected = (payments || [])
+        .filter(p => p['Status'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], m, y))
+        .reduce((sum, p) => sum + (p['Amount'] || 0), 0);
+
+      // Units completed this month
+      const unitsCompleted = projects.filter(p => 
+        p.Stage === 'Complete' && isInMonth(p['Completion Date'], m, y)
+      ).reduce((sum, p) => sum + (parseInt(p['Mod Count']) || 1), 0);
+
+      monthlyData.push({
+        month: m,
+        year: y,
+        label: getMonthLabel(m, y),
+        contractsValue,
+        contractsCount: contractsSigned.length,
+        cashCollected,
+        unitsCompleted,
+      });
+    }
+
+    // Geographic split
+    const usaProjects = activePipeline.filter(p => {
+      const market = (p['Site State/Province'] || '').toUpperCase();
+      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL'].includes(market);
+    });
+    const canadaProjects = activePipeline.filter(p => {
+      const market = (p['Site State/Province'] || '').toUpperCase();
+      return ['AB', 'BC', 'ON', 'SK', 'MB', 'QC'].includes(market);
+    });
+
+    return {
+      pipelineValue,
+      pipelineMods,
+      pipelineCount: activePipeline.length,
+      productionValue,
+      productionCount: inProduction.length,
+      backlogValue,
+      backlogCount: backlog.length,
+      completedValue,
+      completedMods,
+      completedCount: completedThisYear.length,
+      positionsUsed,
+      capacityUtilization,
+      avgContractValue,
+      cashThisMonth: cashThisYear,
+      ytdCash,
+      byStage,
+      monthlyData,
+      usaValue: usaProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+      usaCount: usaProjects.length,
+      canadaValue: canadaProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+      canadaCount: canadaProjects.length,
+    };
+  }, [projects, payments, currentMonth, currentYear]);
+
+  // Simple line chart
+  const LineChart = ({ data, valueKey, color, height = 120 }) => {
+    const values = data.map(d => d[valueKey]);
+    const max = Math.max(...values, 1);
+    const min = Math.min(...values, 0);
+    const range = max - min || 1;
+    const width = 100;
+    
+    const points = values.map((v, i) => {
+      const x = (i / (values.length - 1)) * width;
+      const y = height - ((v - min) / range) * (height - 20) - 10;
+      return `${x},${y}`;
+    }).join(' ');
+
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height }}>
+        <defs>
+          <linearGradient id={`gradient-${valueKey}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon
+          points={`0,${height} ${points} ${width},${height}`}
+          fill={`url(#gradient-${valueKey})`}
+        />
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {values.map((v, i) => {
+          const x = (i / (values.length - 1)) * width;
+          const y = height - ((v - min) / range) * (height - 20) - 10;
+          return <circle key={i} cx={x} cy={y} r="2" fill={color} />;
+        })}
+      </svg>
+    );
+  };
+
+  // Bar chart
+  const BarChart = ({ data, valueKey, color, height = 120 }) => {
+    const values = data.map(d => d[valueKey]);
+    const max = Math.max(...values, 1);
+    const barWidth = 100 / data.length - 2;
+
+    return (
+      <svg viewBox={`0 0 100 ${height}`} className="w-full" style={{ height }}>
+        {values.map((v, i) => {
+          const barHeight = (v / max) * (height - 20);
+          const x = (i / data.length) * 100 + 1;
+          return (
+            <rect
+              key={i}
+              x={x}
+              y={height - barHeight - 10}
+              width={barWidth}
+              height={barHeight}
+              fill={color}
+              rx="2"
+              className="hover:opacity-80"
+            />
+          );
+        })}
+      </svg>
+    );
+  };
+
+  const stageOrder = ['Concept', 'D&E', 'Permitting', 'Production', 'Logistics'];
+  const stageColors = {
+    'Concept': '#A78BFA',
+    'D&E': '#3B82F6',
+    'Permitting': '#F59E0B',
+    'Production': '#10B981',
+    'Logistics': '#06B6D4',
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Investor Dashboard</h2>
+          <p className="text-sm text-gray-500">
+            Honomobo Corporation • {getMonthLabel(currentMonth, currentYear)} • <span className="text-blue-600 font-medium">Live Data</span>
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-sm text-gray-500">Total Pipeline</div>
+          <div className="text-3xl font-bold text-gray-900">{formatCurrency(metrics.pipelineValue)}</div>
+        </div>
+      </div>
+
+      {/* Key Metrics */}
+      <div className="grid grid-cols-5 gap-4">
+        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-5 text-white">
+          <div className="text-blue-100 text-sm mb-1">Active Pipeline</div>
+          <div className="text-3xl font-bold">{formatCurrency(metrics.pipelineValue)}</div>
+          <div className="text-blue-100 text-sm mt-2">{metrics.pipelineCount} projects • {metrics.pipelineMods} mods</div>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-5 text-white">
+          <div className="text-emerald-100 text-sm mb-1">In Production</div>
+          <div className="text-3xl font-bold">{formatCurrency(metrics.productionValue)}</div>
+          <div className="text-emerald-100 text-sm mt-2">{metrics.productionCount} projects active</div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl p-5 text-white">
+          <div className="text-amber-100 text-sm mb-1">Contracted Backlog</div>
+          <div className="text-3xl font-bold">{formatCurrency(metrics.backlogValue)}</div>
+          <div className="text-amber-100 text-sm mt-2">{metrics.backlogCount} in D&E/Permitting</div>
+        </div>
+        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-5 text-white">
+          <div className="text-purple-100 text-sm mb-1">YTD Cash Collected</div>
+          <div className="text-3xl font-bold">{formatCurrency(metrics.ytdCash)}</div>
+          <div className="text-purple-100 text-sm mt-2">{formatCurrency(metrics.cashThisMonth)} this month</div>
+        </div>
+        <div className="bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-xl p-5 text-white">
+          <div className="text-cyan-100 text-sm mb-1">Capacity Utilization</div>
+          <div className="text-3xl font-bold">{metrics.capacityUtilization}%</div>
+          <div className="text-cyan-100 text-sm mt-2">{metrics.positionsUsed}/18 positions</div>
+        </div>
+      </div>
+
+      {/* Charts Row */}
+      <div className="grid grid-cols-3 gap-6">
+        {/* Monthly Contracts Signed */}
+        <div className="bg-white rounded-xl border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Contracts Signed (12 mo)</h3>
+            <span className="text-sm text-gray-500">Value</span>
+          </div>
+          <LineChart data={metrics.monthlyData} valueKey="contractsValue" color="#3B82F6" height={140} />
+          <div className="flex justify-between mt-2 text-xs text-gray-400">
+            <span>{metrics.monthlyData[0]?.label}</span>
+            <span>{metrics.monthlyData[metrics.monthlyData.length - 1]?.label}</span>
+          </div>
+        </div>
+
+        {/* Monthly Cash Collected */}
+        <div className="bg-white rounded-xl border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Cash Collected (12 mo)</h3>
+            <span className="text-sm text-gray-500">Monthly</span>
+          </div>
+          <BarChart data={metrics.monthlyData} valueKey="cashCollected" color="#10B981" height={140} />
+          <div className="flex justify-between mt-2 text-xs text-gray-400">
+            <span>{metrics.monthlyData[0]?.label}</span>
+            <span>{metrics.monthlyData[metrics.monthlyData.length - 1]?.label}</span>
+          </div>
+        </div>
+
+        {/* Units Completed */}
+        <div className="bg-white rounded-xl border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Units Delivered (12 mo)</h3>
+            <span className="text-sm text-gray-500">Mods</span>
+          </div>
+          <BarChart data={metrics.monthlyData} valueKey="unitsCompleted" color="#8B5CF6" height={140} />
+          <div className="flex justify-between mt-2 text-xs text-gray-400">
+            <span>{metrics.monthlyData[0]?.label}</span>
+            <span>{metrics.monthlyData[metrics.monthlyData.length - 1]?.label}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Pipeline Breakdown & Geography */}
+      <div className="grid grid-cols-2 gap-6">
+        {/* Pipeline by Stage */}
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Pipeline by Stage</h3>
+          <div className="space-y-3">
+            {stageOrder.map(stage => {
+              const data = metrics.byStage[stage] || { count: 0, value: 0 };
+              const pct = metrics.pipelineValue > 0 ? (data.value / metrics.pipelineValue) * 100 : 0;
+              return (
+                <div key={stage}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded" style={{ backgroundColor: stageColors[stage] }} />
+                      <span className="text-sm font-medium">{stage}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-gray-500">{data.count} projects</span>
+                      <span className="mx-2 text-gray-300">•</span>
+                      <span className="font-medium">{formatCurrency(data.value)}</span>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full rounded-full transition-all" 
+                      style={{ width: `${pct}%`, backgroundColor: stageColors[stage] }} 
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4 pt-4 border-t flex justify-between">
+            <span className="text-sm text-gray-500">Total Active Pipeline</span>
+            <span className="font-semibold">{formatCurrency(metrics.pipelineValue)}</span>
+          </div>
+        </div>
+
+        {/* Geographic Distribution */}
+        <div className="bg-white rounded-xl border p-5">
+          <h3 className="font-semibold text-gray-900 mb-4">Geographic Distribution</h3>
+          <div className="grid grid-cols-2 gap-6">
+            <div className="text-center p-4 bg-blue-50 rounded-xl">
+              <div className="text-4xl mb-2">🇺🇸</div>
+              <div className="text-2xl font-bold text-blue-600">{formatCurrency(metrics.usaValue)}</div>
+              <div className="text-sm text-gray-500">{metrics.usaCount} projects</div>
+              <div className="text-xs text-gray-400 mt-1">
+                {metrics.pipelineValue > 0 ? Math.round((metrics.usaValue / metrics.pipelineValue) * 100) : 0}% of pipeline
+              </div>
+            </div>
+            <div className="text-center p-4 bg-red-50 rounded-xl">
+              <div className="text-4xl mb-2">🇨🇦</div>
+              <div className="text-2xl font-bold text-red-600">{formatCurrency(metrics.canadaValue)}</div>
+              <div className="text-sm text-gray-500">{metrics.canadaCount} projects</div>
+              <div className="text-xs text-gray-400 mt-1">
+                {metrics.pipelineValue > 0 ? Math.round((metrics.canadaValue / metrics.pipelineValue) * 100) : 0}% of pipeline
+              </div>
+            </div>
+          </div>
+          <div className="mt-4">
+            <div className="h-4 bg-gray-100 rounded-full overflow-hidden flex">
+              <div 
+                className="h-full bg-blue-500" 
+                style={{ width: `${metrics.pipelineValue > 0 ? (metrics.usaValue / metrics.pipelineValue) * 100 : 0}%` }} 
+              />
+              <div 
+                className="h-full bg-red-500" 
+                style={{ width: `${metrics.pipelineValue > 0 ? (metrics.canadaValue / metrics.pipelineValue) * 100 : 0}%` }} 
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Stats */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl border p-5 text-center">
+          <div className="text-sm text-gray-500 mb-1">Avg Contract Value</div>
+          <div className="text-2xl font-bold">{formatCurrency(metrics.avgContractValue)}</div>
+        </div>
+        <div className="bg-white rounded-xl border p-5 text-center">
+          <div className="text-sm text-gray-500 mb-1">YTD Completed</div>
+          <div className="text-2xl font-bold">{metrics.completedMods} mods</div>
+          <div className="text-xs text-gray-400">{formatCurrency(metrics.completedValue)}</div>
+        </div>
+        <div className="bg-white rounded-xl border p-5 text-center">
+          <div className="text-sm text-gray-500 mb-1">Production Capacity</div>
+          <div className="text-2xl font-bold">18 positions</div>
+          <div className="text-xs text-gray-400">~80 mods/year potential</div>
+        </div>
+        <div className="bg-white rounded-xl border p-5 text-center">
+          <div className="text-sm text-gray-500 mb-1">Facility</div>
+          <div className="text-2xl font-bold">51,255 sf</div>
+          <div className="text-xs text-gray-400">Nisku, Alberta</div>
+        </div>
+      </div>
     </div>
   );
 }
