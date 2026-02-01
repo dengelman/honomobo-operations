@@ -3488,8 +3488,12 @@ function KPIDashboardView({ projects, payments }) {
 // PIPELINE ANALYTICS VIEW
 // ══════════════════════════════════════════════════════════════════════════════
 const COUNTRY_MAP = {
-  'CA': 'Canada', 'AB': 'Canada', 'BC': 'Canada', 'ON': 'Canada', 'MB': 'Canada', 'QC': 'Canada',
-  'US': 'USA', 'USA': 'USA', 'WA': 'USA', 'CA_US': 'USA', 'CO': 'USA', 'HI': 'USA', 'NY': 'USA', 'OR': 'USA', 'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA',
+  // Canada - use province codes
+  'AB': 'Canada', 'BC': 'Canada', 'ON': 'Canada', 'MB': 'Canada', 'QC': 'Canada', 'SK': 'Canada',
+  // USA - state codes (CA = California, not Canada!)
+  'CA': 'USA', 'HI': 'USA', 'CO': 'USA', 'WA': 'USA', 'NY': 'USA', 'OR': 'USA', 
+  'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA', 'WI': 'USA',
+  'US': 'USA', 'USA': 'USA',
 };
 
 const MARKET_DETAILS = {
@@ -4071,7 +4075,7 @@ function InvestorDashboardView({ projects, payments }) {
     // Geographic split
     const usaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
-      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL'].includes(market);
+      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL', 'WI'].includes(market);
     });
     const canadaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
