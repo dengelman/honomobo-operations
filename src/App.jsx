@@ -1390,40 +1390,74 @@ const PLSummaryCard = ({ title, value, subtitle, icon: Icon, color = 'gray' }) =
 };
 
 function PLView({ projects }) {
-  // Calculate production revenue/costs from real project data
-  const productionData = useMemo(() => {
-    const prodProjects = projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
-    const deProjects = projects.filter(p => p.Stage === 'D&E');
+  const plMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const WIP_FIELD_MAP = {
+    'Jan': 'WIP Jan', 'Feb': 'WIP Feb', 'Mar': 'WIP Mar', 'Apr': 'WIP Apr',
+    'May': 'WIP May', 'Jun': 'WIP Jun', 'Jul': 'WIP Jul', 'Aug': 'WIP Aug',
+    'Sep': 'WIP Sep', 'Oct': 'WIP Oct', 'Nov': 'WIP Nov', 'Dec': 'WIP Dec'
+  };
 
-    // Total values
-    const totalProdContract = prodProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
-    const totalProdBudget = prodProjects.reduce((s, p) => s + (p['MFG Budget'] || 0), 0);
+  // Calculate production revenue/costs from real WIP data
+  const productionData = useMemo(() => {
+    // Get projects that have WIP data (Production/Logistics stage or have WIP values)
+    const wipProjects = projects.filter(p => {
+      const hasWip = plMonths.some(m => p[WIP_FIELD_MAP[m]] !== undefined && p[WIP_FIELD_MAP[m]] !== null && p[WIP_FIELD_MAP[m]] !== '');
+      return hasWip || p.Stage === 'Production' || p.Stage === 'Logistics';
+    });
+
+    const deProjects = projects.filter(p => p.Stage === 'D&E');
     const totalDeContract = deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
 
-    // Distribute across months based on project count and progress
+    // Calculate revenue by month from WIP changes
+    // Revenue = Budget × (WIP this month - WIP last month)
     const revenue = {};
     const costs = {};
 
     plMonths.forEach((month, idx) => {
-      // Simple distribution - more revenue in current and upcoming months
-      const currentMonth = new Date().getMonth();
-      let weight;
+      let monthRevenue = 0;
+      let monthCosts = 0;
 
-      if (idx < currentMonth) {
-        weight = 0.06; // Past months - some revenue recognized
-      } else if (idx === currentMonth) {
-        weight = 0.12; // Current month - higher
-      } else if (idx < currentMonth + 3) {
-        weight = 0.10; // Next few months
-      } else {
-        weight = 0.08; // Further out
-      }
+      wipProjects.forEach(p => {
+        const budget = p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7);
+        const contract = p['Contract Value'] || 0;
+        
+        // Get current month WIP
+        const currentWip = parseFloat(p[WIP_FIELD_MAP[month]]) || 0;
+        
+        // Get previous month WIP
+        let prevWip = 0;
+        if (idx === 0) {
+          // January - compare to Dec 31
+          prevWip = parseFloat(p['WIP Dec 31']) || 0;
+        } else {
+          const prevMonth = plMonths[idx - 1];
+          prevWip = parseFloat(p[WIP_FIELD_MAP[prevMonth]]) || 0;
+        }
 
-      revenue[month] = Math.round(totalProdContract * weight);
-      costs[month] = Math.round(totalProdBudget * weight);
+        // Revenue recognized this month = Contract × WIP change
+        const wipChange = Math.max(0, currentWip - prevWip);
+        monthRevenue += contract * wipChange;
+        
+        // Costs incurred = Budget × WIP change
+        monthCosts += budget * wipChange;
+      });
+
+      revenue[month] = Math.round(monthRevenue);
+      costs[month] = Math.round(monthCosts);
     });
 
-    return { revenue, costs, totalProdContract, totalProdBudget, totalDeContract, prodCount: prodProjects.length, deCount: deProjects.length };
+    const totalProdContract = wipProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    const totalProdBudget = wipProjects.reduce((s, p) => s + (p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7)), 0);
+
+    return { 
+      revenue, 
+      costs, 
+      totalProdContract, 
+      totalProdBudget, 
+      totalDeContract, 
+      prodCount: wipProjects.length, 
+      deCount: deProjects.length 
+    };
   }, [projects]);
 
   const [inputs, setInputs] = useState({
