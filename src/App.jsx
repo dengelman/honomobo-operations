@@ -503,31 +503,34 @@ function WIPScheduleView({ projects }) {
       .filter(p => ['Production', 'Logistics'].includes(p.Stage))
       .map(p => {
         const currentWip = calculateWipFromProject(p);
-        const currentMonth = new Date().getMonth(); // 0 = Jan
-        
-        // Generate WIP schedule
+        const currentMonth = new Date().getMonth(); // 0 = Jan, 1 = Feb, etc.
+
+        // Generate WIP schedule - approximately 25% progress per month
         const wip = {};
         WIP_MONTHS.forEach((m, idx) => {
           if (idx === 0) {
-            // Dec baseline - estimate prior month
-            wip[m.key] = currentWip > 10 ? Math.max(0, currentWip - 15) : null;
+            // Dec 31 baseline - estimate where project was at end of last year
+            const monthsFromDec = currentMonth + 1; // How many months since Dec
+            const decWip = Math.max(0, currentWip - (monthsFromDec * 25));
+            wip[m.key] = decWip > 0 ? decWip : null;
           } else {
             const monthIndex = idx - 1; // 0 = Jan
             if (monthIndex < currentMonth) {
-              // Past months - show progression to current
+              // Past months - show progression to current (25% per month)
               const monthsAgo = currentMonth - monthIndex;
-              wip[m.key] = Math.max(0, currentWip - (monthsAgo * 8));
+              wip[m.key] = Math.max(0, currentWip - (monthsAgo * 25));
+              if (wip[m.key] === 0 && currentWip > 0) wip[m.key] = null; // Not started yet
             } else if (monthIndex === currentMonth) {
-              // Current month
+              // Current month - actual WIP
               wip[m.key] = currentWip;
             } else {
-              // Future months - project forward
+              // Future months - project forward 25% per month to 100%
               const monthsAhead = monthIndex - currentMonth;
-              wip[m.key] = Math.min(100, currentWip + (monthsAhead * 8));
+              wip[m.key] = Math.min(100, currentWip + (monthsAhead * 25));
             }
           }
         });
-        
+
         return {
           id: p['Project ID'],
           customer: p['Status'] || p['Customer (text)'] || '',
