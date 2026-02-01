@@ -103,6 +103,24 @@ const airtableAPI = {
 const formatCurrency = v => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v || 0);
 const formatCompact = v => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v?.toLocaleString() || '0';
 
+// Get mod count from Model/Unit Type (HO2=2, HO3=3, HO5=5, HS6=6, HS8=8, SO1=1, etc.)
+const getModCountFromModel = (project) => {
+  const model = (project?.['Model'] || project?.['Unit Type'] || '').toUpperCase();
+  
+  // Extract number from model name (HO2, HO3, HO4, HO5, HS6, HS8, HS12, SO1)
+  const match = model.match(/(HO|HS|SO)(\d+)/);
+  if (match) {
+    return parseInt(match[2]) || 1;
+  }
+  
+  // Special cases
+  if (model.includes('BATH') || model.includes('BAR')) return 1;
+  if (model.includes('PD')) return 5; // Pod?
+  
+  // Default
+  return 1;
+};
+
 const MARKET_MAP = {
   'CA': 'california', 'California': 'california',
   'HI': 'hawaii', 'Hawaii': 'hawaii',
@@ -3135,7 +3153,8 @@ function KPIDashboardView({ projects, payments }) {
   };
 
   // Helper: Get mod count from project (default 1 if not set)
-  const getModCount = (p) => parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
+  // Helper: Get mod count from model
+  const getModCount = (p) => getModCountFromModel(p);
 
   // Calculate KPI values from real data
   const calculateKpiValues = useMemo(() => {
@@ -3584,7 +3603,7 @@ function PipelineAnalyticsView({ projects }) {
 
     filteredProjects.forEach(p => {
       const value = p['Contract Value'] || 0;
-      const mods = parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
+      const mods = getModCountFromModel(p);
       const country = getCountry(p);
       const market = getMarket(p);
       const model = getModel(p);
@@ -3991,7 +4010,7 @@ function InvestorDashboardView({ projects, payments }) {
     // Pipeline metrics
     const activePipeline = projects.filter(p => p.Stage !== 'Complete');
     const pipelineValue = activePipeline.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
-    const pipelineMods = activePipeline.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
+    const pipelineMods = activePipeline.reduce((sum, p) => sum + getModCountFromModel(p), 0);
 
     // Production metrics
     const inProduction = projects.filter(p => p.Stage === 'Production');
@@ -4008,7 +4027,7 @@ function InvestorDashboardView({ projects, payments }) {
       new Date(p['Completion Date']).getFullYear() === thisYear
     );
     const completedValue = completedThisYear.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
-    const completedMods = completedThisYear.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
+    const completedMods = completedThisYear.reduce((sum, p) => sum + getModCountFromModel(p), 0);
 
     // Capacity utilization (18 positions)
     const positionsUsed = inProduction.filter(p => p['Bay Assignment']).length;
@@ -4061,7 +4080,7 @@ function InvestorDashboardView({ projects, payments }) {
       // Units completed this month
       const unitsCompleted = projects.filter(p => 
         p.Stage === 'Complete' && isInMonth(p['Completion Date'], m, y)
-      ).reduce((sum, p) => sum + (parseInt(p['Mod Count']) || 1), 0);
+      ).reduce((sum, p) => sum + getModCountFromModel(p), 0);
 
       monthlyData.push({
         month: m,
