@@ -476,33 +476,26 @@ const WipCell = ({ value, isBaseline, isEditing, onStartEdit, onChange }) => {
 };
 
 function WIPScheduleView({ projects }) {
-  // Calculate WIP % based on real Airtable data (Stage + MFG Week)
+  // Calculate WIP % based on MFG Status milestones
   const calculateWipFromProject = (p) => {
     const stage = p.Stage;
-    const mfgWeek = parseInt(p['MFG Week']) || 0;
-    const mfgStatus = p['MFG Status'];
-    
-    // Base WIP by stage
-    if (stage === 'Assessment') return 0;
-    if (stage === 'Concept') return 10;
-    if (stage === 'D&E') return 25;
-    if (stage === 'Permitting') return 40;
-    if (stage === 'Complete') return 100;
-    if (stage === 'Logistics') return 95;
-    
-    // Production stage - use MFG Week or MFG Status
-    if (stage === 'Production') {
-      if (mfgWeek > 0) {
-        return 50 + Math.min(45, Math.round(mfgWeek * 3.75)); // 50% at start, up to 95%
-      }
-      if (mfgStatus && MFG_STATUS_TO_WEEK[mfgStatus]) {
-        const estimatedWeek = MFG_STATUS_TO_WEEK[mfgStatus];
-        return 50 + Math.min(45, Math.round(estimatedWeek * 3.75));
-      }
-      return 50; // Default for Production with no details
-    }
-    
-    return 0;
+    const mfgStatus = p['MFG Status'] || p['MFG Stage'];
+
+    // Only manufacturing stages have WIP
+    if (stage === 'Logistics') return 100;
+    if (stage !== 'Production') return 0;
+
+    // Production stage - WIP based on MFG Status
+    const MFG_WIP = {
+      'Fab Complete': 25,
+      'Framing Complete': 50,
+      'Mech Rough Ins Complete': 65,
+      'Drywall Complete': 75,
+      'Final QC': 100,
+      'Ready to Ship': 100
+    };
+
+    return MFG_WIP[mfgStatus] || 0; // 0% at start of manufacturing
   };
 
   const buildWipData = (projects) => {
