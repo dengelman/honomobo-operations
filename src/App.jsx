@@ -3561,13 +3561,23 @@ const MARKET_DETAILS = {
 };
 
 // Sales channels - California = Novare, Ontario = McLean, rest = Direct
+// Exception: HDI projects are direct sales even in CA
 const SALES_CHANNELS = {
   novare: { name: 'Novare (CA Dealer)', color: '#F59E0B', icon: '🏪' },
   mclean: { name: 'McLean (ON Dealer)', color: '#EC4899', icon: '🏪' },
   direct: { name: 'Direct Sale', color: '#3B82F6', icon: '🏠' },
 };
 
-const getSalesChannel = (market) => {
+const getSalesChannel = (market, project = null) => {
+  // HDI projects are always direct sales, even in CA
+  if (project) {
+    const projectId = (project['Project ID'] || '').toUpperCase();
+    const customer = (project['Status'] || project['Customer (text)'] || '').toUpperCase();
+    if (projectId.includes('HDI') || customer.includes('HDI')) {
+      return 'direct';
+    }
+  }
+  
   if (market === 'CA') return 'novare';
   if (market === 'ON') return 'mclean';
   return 'direct';
@@ -3639,7 +3649,7 @@ function PipelineAnalyticsView({ projects }) {
       const model = getModel(p);
       const stage = p.Stage || 'Unknown';
       const rawMarket = (p['Site State/Province'] || p['Market'] || '').toUpperCase();
-      const channel = getSalesChannel(rawMarket);
+      const channel = getSalesChannel(rawMarket, p);
 
       // Totals
       data.total.count++;
