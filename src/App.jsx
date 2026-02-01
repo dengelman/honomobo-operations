@@ -61,8 +61,8 @@ const airtableAPI = {
     });
     const data = await res.json();
     if (data.error) {
-      console.error('Airtable error:', data.error);
-      throw new Error(data.error.message || 'Failed to update');
+      console.error('Airtable update error:', data.error);
+      throw new Error(data.error.message || 'Failed to update project');
     }
     return { id: data.id, ...data.fields };
   },
@@ -416,303 +416,326 @@ function DashboardView({ projects, onEdit }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WIP SCHEDULE VIEW - Editable, saves to Airtable
+// WIP SCHEDULE VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
+const WIP_MONTHS = [
+  { key: 'dec', label: 'Dec 31', isBaseline: true, airtableField: 'WIP Dec 31' },
+  { key: 'jan', label: 'Jan', airtableField: 'WIP Jan' },
+  { key: 'feb', label: 'Feb', airtableField: 'WIP Feb' },
+  { key: 'mar', label: 'Mar', airtableField: 'WIP Mar' },
+  { key: 'apr', label: 'Apr', airtableField: 'WIP Apr' },
+  { key: 'may', label: 'May', airtableField: 'WIP May' },
+  { key: 'jun', label: 'Jun', airtableField: 'WIP Jun' },
+  { key: 'jul', label: 'Jul', airtableField: 'WIP Jul' },
+  { key: 'aug', label: 'Aug', airtableField: 'WIP Aug' },
+  { key: 'sep', label: 'Sep', airtableField: 'WIP Sep' },
+  { key: 'oct', label: 'Oct', airtableField: 'WIP Oct' },
+  { key: 'nov', label: 'Nov', airtableField: 'WIP Nov' },
+  { key: 'dec2', label: 'Dec', airtableField: 'WIP Dec' },
+];
 
-function WIPScheduleView({ projects, onUpdateWip }) {
-  // WIP month fields that will be stored in Airtable
-  const WIP_FIELDS = [
-    { key: 'dec31', label: 'Dec 31', field: 'WIP Dec 31' },
-    { key: 'jan', label: 'Jan', field: 'WIP Jan' },
-    { key: 'feb', label: 'Feb', field: 'WIP Feb' },
-    { key: 'mar', label: 'Mar', field: 'WIP Mar' },
-    { key: 'apr', label: 'Apr', field: 'WIP Apr' },
-    { key: 'may', label: 'May', field: 'WIP May' },
-    { key: 'jun', label: 'Jun', field: 'WIP Jun' },
-    { key: 'jul', label: 'Jul', field: 'WIP Jul' },
-    { key: 'aug', label: 'Aug', field: 'WIP Aug' },
-    { key: 'sep', label: 'Sep', field: 'WIP Sep' },
-    { key: 'oct', label: 'Oct', field: 'WIP Oct' },
-    { key: 'nov', label: 'Nov', field: 'WIP Nov' },
-    { key: 'dec', label: 'Dec', field: 'WIP Dec' },
-  ];
+const WipCell = ({ value, isBaseline, isEditing, onStartEdit, onChange }) => {
+  const [editValue, setEditValue] = useState(value || '');
+  useEffect(() => { setEditValue(value || ''); }, [value]);
+  
+  const handleSave = () => {
+    onChange(editValue === '' ? null : parseInt(editValue));
+  };
+  
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          className="w-12 px-1 py-0.5 text-sm border border-blue-400 rounded text-center focus:outline-none"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSave();
+            if (e.key === 'Escape') onChange(value);
+          }}
+        />
+        <button onClick={handleSave} className="text-emerald-600 hover:text-emerald-700">
+          <Check className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+  
+  if (value === null || value === undefined) {
+    return <div onClick={onStartEdit} className="text-gray-300 cursor-pointer hover:bg-gray-100 px-2 py-1 rounded">—</div>;
+  }
+  
+  return (
+    <div
+      onClick={onStartEdit}
+      className={`px-2 py-1 rounded cursor-pointer text-sm font-medium transition-colors ${
+        value === 100 ? 'bg-emerald-100 text-emerald-700' :
+        isBaseline ? 'bg-amber-100 text-amber-700' :
+        'bg-blue-50 text-blue-700 hover:bg-blue-100'
+      }`}
+    >
+      {value}%
+    </div>
+  );
+};
 
-  // Build WIP data from projects (reads from Airtable WIP fields)
+function WIPScheduleView({ projects, onUpdateProject }) {
+  // Read WIP data directly from Airtable fields
   const buildWipData = (projects) => {
     return projects
-      .filter(p => ['Production', 'Logistics', 'D&E', 'Permitting'].includes(p.Stage))
+      .filter(p => ['Production', 'Logistics'].includes(p.Stage))
       .map(p => {
+        // Read WIP values from Airtable fields
         const wip = {};
-        WIP_FIELDS.forEach(m => {
-          const val = p[m.field];
-          wip[m.key] = val !== undefined && val !== null && val !== '' ? parseFloat(val) : null;
+        WIP_MONTHS.forEach(m => {
+          const airtableValue = p[m.airtableField];
+          // Airtable stores percent as decimal (0.25 = 25%), convert to integer
+          if (airtableValue !== undefined && airtableValue !== null) {
+            wip[m.key] = Math.round(airtableValue * 100);
+          } else {
+            wip[m.key] = null;
+          }
         });
-        
+
         return {
-          id: p['Project ID'] || '',
-          customer: p['Status'] || p['Customer (text)'] || p['Customer'] || '',
+          id: p['Project ID'],
+          customer: p['Status'] || p['Customer (text)'] || '',
           unit: p['Model'] || p['Unit Type'] || '',
           contract: p['Contract Value'] || 0,
-          budget: p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
+          budget: p['MFG Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
           wip,
-          airtableId: p.id,
-          stage: p.Stage
+          airtableId: p.id
         };
-      })
-      .sort((a, b) => {
-        // Sort by first non-null WIP month (earliest start first)
-        const aFirst = WIP_FIELDS.findIndex(m => a.wip[m.key] !== null && a.wip[m.key] > 0);
-        const bFirst = WIP_FIELDS.findIndex(m => b.wip[m.key] !== null && b.wip[m.key] > 0);
-        if (aFirst === -1 && bFirst === -1) return 0;
-        if (aFirst === -1) return 1;
-        if (bFirst === -1) return -1;
-        return aFirst - bFirst;
       });
   };
 
   const [wipData, setWipData] = useState(() => buildWipData(projects));
   const [editingCell, setEditingCell] = useState(null);
-  const [editValue, setEditValue] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [unitFilter, setUnitFilter] = useState('all');
   const [showCompleted, setShowCompleted] = useState(true);
-  const [saving, setSaving] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   useEffect(() => {
+    // Rebuild WIP data from Airtable whenever projects change
     setWipData(buildWipData(projects));
   }, [projects]);
 
-  const currentMonth = new Date().getMonth(); // 0 = Jan
-
-  // Handle cell click - start editing
-  const handleCellClick = (projectId, monthKey, currentValue) => {
-    setEditingCell({ projectId, monthKey });
-    setEditValue(currentValue !== null ? Math.round(currentValue * 100).toString() : '');
-  };
-
-  // Handle save
-  const handleSave = async (projectId, monthKey) => {
-    const project = wipData.find(p => p.id === projectId);
-    if (!project) return;
-
-    const newValue = editValue === '' ? null : parseInt(editValue) / 100;
-    const field = WIP_FIELDS.find(m => m.key === monthKey)?.field;
-    
-    if (field && onUpdateWip) {
-      setSaving({ projectId, monthKey });
-      try {
-        await onUpdateWip(project.airtableId, { [field]: newValue });
-        // Update local state
-        setWipData(prev => prev.map(p => 
-          p.id === projectId 
-            ? { ...p, wip: { ...p.wip, [monthKey]: newValue } }
-            : p
-        ));
-      } catch (err) {
-        alert('Failed to save: ' + err.message);
-      }
-      setSaving(null);
-    } else {
-      // Just update local state if no save handler
-      setWipData(prev => prev.map(p => 
-        p.id === projectId 
-          ? { ...p, wip: { ...p.wip, [monthKey]: newValue } }
-          : p
-      ));
-    }
-    setEditingCell(null);
-  };
-
-  // Handle key press in edit mode
-  const handleKeyDown = (e, projectId, monthKey) => {
-    if (e.key === 'Enter') {
-      handleSave(projectId, monthKey);
-    } else if (e.key === 'Escape') {
-      setEditingCell(null);
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      handleSave(projectId, monthKey);
-      // Move to next cell
-      const monthIdx = WIP_FIELDS.findIndex(m => m.key === monthKey);
-      if (monthIdx < WIP_FIELDS.length - 1) {
-        const nextMonth = WIP_FIELDS[monthIdx + 1].key;
-        const currentVal = wipData.find(p => p.id === projectId)?.wip[nextMonth];
-        handleCellClick(projectId, nextMonth, currentVal);
-      }
-    }
-  };
-
-  // Filter data
-  const filteredData = wipData.filter(p => {
-    if (searchTerm && !p.id.toLowerCase().includes(searchTerm.toLowerCase()) && 
-        !p.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
-      return false;
-    }
-    if (!showCompleted) {
-      const lastWip = WIP_FIELDS.reduce((last, m) => p.wip[m.key] !== null ? p.wip[m.key] : last, 0);
-      if (lastWip >= 1) return false;
-    }
-    return true;
-  });
-
-  // Calculate summary
+  const units = [...new Set(wipData.map(p => p.unit).filter(Boolean))].sort();
+  
   const summary = useMemo(() => {
-    const totalContract = filteredData.reduce((sum, p) => sum + p.contract, 0);
-    const totalBudget = filteredData.reduce((sum, p) => sum + p.budget, 0);
-    
-    // Revenue by month (incremental)
-    const revenueByMonth = {};
-    WIP_FIELDS.forEach((month, idx) => {
-      revenueByMonth[month.key] = filteredData.reduce((sum, p) => {
-        const wipPercent = p.wip[month.key] || 0;
-        const prevMonth = WIP_FIELDS[idx - 1];
-        const prevWipPercent = prevMonth ? (p.wip[prevMonth.key] || 0) : 0;
-        return sum + (p.budget * Math.max(0, wipPercent - prevWipPercent));
-      }, 0);
+    const activeProjects = wipData.filter(p => {
+      const latestWip = Object.values(p.wip).filter(v => v !== null).pop() || 0;
+      return showCompleted || latestWip < 100;
     });
-
+    const totalContract = activeProjects.reduce((sum, p) => sum + p.contract, 0);
+    const totalBudget = activeProjects.reduce((sum, p) => sum + p.budget, 0);
+    const currentMonthKey = WIP_MONTHS[new Date().getMonth() + 1]?.key || 'jan';
+    const recognizedRevenue = activeProjects.reduce((sum, p) => sum + (p.contract * (p.wip[currentMonthKey] || 0) / 100), 0);
+    const revenueByMonth = WIP_MONTHS.reduce((acc, month, idx) => {
+      acc[month.key] = activeProjects.reduce((sum, p) => {
+        const wipPercent = p.wip[month.key] || 0;
+        const prevMonth = WIP_MONTHS[idx - 1];
+        const prevWipPercent = prevMonth ? (p.wip[prevMonth.key] || 0) : 0;
+        return sum + (p.contract * Math.max(0, wipPercent - prevWipPercent) / 100);
+      }, 0);
+      return acc;
+    }, {});
     return {
-      projectCount: filteredData.length,
+      projectCount: activeProjects.length,
       totalContract,
       totalBudget,
+      recognizedRevenue,
       revenueByMonth,
+      projectedMargin: totalContract - totalBudget,
+      marginPercent: totalContract > 0 ? ((totalContract - totalBudget) / totalContract * 100).toFixed(1) : '0'
     };
-  }, [filteredData]);
+  }, [wipData, showCompleted]);
 
-  // Get cell styling
-  const getCellStyle = (value, monthIdx) => {
-    if (value === null || value === undefined) return 'bg-white text-gray-400';
-    if (value >= 1) return 'bg-emerald-100 text-emerald-700 font-medium';
-    if (monthIdx === 0) return 'bg-amber-100 text-amber-700'; // Dec 31 = yellow
-    return 'bg-blue-50 text-blue-700';
-  };
+  const filteredData = useMemo(() => {
+    let result = wipData.filter(p => {
+      if (searchTerm && !p.id.toLowerCase().includes(searchTerm.toLowerCase()) && !p.customer.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      if (unitFilter !== 'all' && p.unit !== unitFilter) return false;
+      if (!showCompleted) {
+        const latestWip = Object.values(p.wip).filter(v => v !== null).pop() || 0;
+        if (latestWip === 100) return false;
+      }
+      return true;
+    });
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        let aVal = ['contract', 'budget'].includes(sortConfig.key) ? a[sortConfig.key] : ['customer', 'id', 'unit'].includes(sortConfig.key) ? a[sortConfig.key] : a.wip[sortConfig.key] || 0;
+        let bVal = ['contract', 'budget'].includes(sortConfig.key) ? b[sortConfig.key] : ['customer', 'id', 'unit'].includes(sortConfig.key) ? b[sortConfig.key] : b.wip[sortConfig.key] || 0;
+        return (aVal < bVal ? -1 : aVal > bVal ? 1 : 0) * (sortConfig.direction === 'asc' ? 1 : -1);
+      });
+    }
+    return result;
+  }, [wipData, searchTerm, unitFilter, showCompleted, sortConfig]);
 
-  const formatPercent = (val) => {
-    if (val === null || val === undefined) return '';
-    return `${Math.round(val * 100)}%`;
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
+  const handleWipUpdate = async (projectId, month, value, airtableId) => {
+    // Update local state immediately
+    setWipData(prev => prev.map(p => p.id === projectId ? { ...p, wip: { ...p.wip, [month]: value } } : p));
+    setEditingCell(null);
+
+    // Find the Airtable field name for this month
+    const monthConfig = WIP_MONTHS.find(m => m.key === month);
+    if (monthConfig && onUpdateProject && airtableId) {
+      // Convert integer percent to decimal for Airtable (25 -> 0.25)
+      const airtableValue = value !== null ? value / 100 : null;
+      await onUpdateProject({ [monthConfig.airtableField]: airtableValue }, airtableId);
+    }
   };
+  
+  const handleExport = () => {
+    const headers = ['Job #', 'Customer', 'Unit', 'Contract', 'Budget', ...WIP_MONTHS.map(m => m.label)];
+    const rows = filteredData.map(p => [p.id, p.customer, p.unit, p.contract, p.budget, ...WIP_MONTHS.map(m => p.wip[m.key] !== null ? `${p.wip[m.key]}%` : '')]);
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `WIP_Schedule_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  };
+  
+  const SortIndicator = ({ columnKey }) => sortConfig.key !== columnKey ? null : <ChevronDown className={`w-3 h-3 inline ml-1 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Work in Progress (WIP) Schedule - 2026</h2>
-          <p className="text-sm text-gray-500">
-            <span className="text-amber-600">Yellow = Dec 31</span> | <span className="text-emerald-600">Green = 100% Complete</span> | Click cells to edit
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm w-48"
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showCompleted}
-              onChange={e => setShowCompleted(e.target.checked)}
-              className="rounded"
-            />
-            Show completed
-          </label>
-        </div>
+        <p className="text-sm text-gray-500">
+          <span className="inline-block w-3 h-3 bg-amber-200 rounded mr-1"></span> Dec 31 Baseline
+          <span className="mx-2">|</span>
+          <span className="inline-block w-3 h-3 bg-emerald-200 rounded mr-1"></span> 100% Complete
+          <span className="mx-2">|</span>
+          Click any cell to edit WIP %
+          <span className="mx-2">|</span>
+          <span className="text-blue-600 font-medium">Data from Airtable</span>
+        </p>
+        <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800">
+          <Download className="w-4 h-4" />Export CSV
+        </button>
       </div>
-
-      {/* Summary Cards */}
+      
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Projects</div>
+        <div className="rounded-xl border p-4 bg-gray-50">
+          <div className="text-sm text-gray-600 mb-1">Active Projects</div>
           <div className="text-2xl font-bold">{summary.projectCount}</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Contract</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalContract)}</div>
+        <div className="rounded-xl border p-4 bg-blue-50 border-blue-200">
+          <div className="text-sm text-gray-600 mb-1">Total Contract Value</div>
+          <div className="text-2xl font-bold">${formatCompact(summary.totalContract)}</div>
+          <div className="text-sm text-gray-500 mt-1">Budget: ${formatCompact(summary.totalBudget)}</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Budget</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalBudget)}</div>
+        <div className="rounded-xl border p-4 bg-emerald-50 border-emerald-200">
+          <div className="text-sm text-gray-600 mb-1">Recognized Revenue</div>
+          <div className="text-2xl font-bold text-emerald-700">${formatCompact(summary.recognizedRevenue)}</div>
+          <div className="text-sm text-gray-500 mt-1">{summary.totalContract > 0 ? Math.round(summary.recognizedRevenue / summary.totalContract * 100) : 0}% of contract</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Gross Margin</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalContract - summary.totalBudget)}</div>
+        <div className="rounded-xl border p-4 bg-amber-50 border-amber-200">
+          <div className="text-sm text-gray-600 mb-1">Projected Margin</div>
+          <div className="text-2xl font-bold text-amber-700">${formatCompact(summary.projectedMargin)}</div>
+          <div className="text-sm text-gray-500 mt-1">{summary.marginPercent}% margin</div>
         </div>
       </div>
-
-      {/* WIP Table */}
+      
+      <div className="bg-white rounded-xl border p-4 flex items-center gap-4 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input type="text" placeholder="Search job # or customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-gray-400" />
+          <select value={unitFilter} onChange={(e) => setUnitFilter(e.target.value)} className="text-sm border rounded-lg px-3 py-2">
+            <option value="all">All Models</option>
+            {units.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} className="rounded border-gray-300 text-blue-500" />
+          Show completed
+        </label>
+        <div className="flex-1" />
+        <div className="text-sm text-gray-500">Showing {filteredData.length} of {wipData.length} projects</div>
+      </div>
+      
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="bg-blue-900 text-white">
-                <th className="px-3 py-3 text-left font-semibold sticky left-0 bg-blue-900 z-10">Job #</th>
-                <th className="px-3 py-3 text-left font-semibold">Customer</th>
-                <th className="px-3 py-3 text-left font-semibold">Unit</th>
-                <th className="px-3 py-3 text-right font-semibold">Contract</th>
-                <th className="px-3 py-3 text-right font-semibold">Budget</th>
-                {WIP_FIELDS.map((month, idx) => (
-                  <th key={month.key} className={`px-2 py-3 text-center font-semibold min-w-[60px] ${idx === 0 ? 'bg-amber-600' : ''}`}>
-                    {month.label}
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100 sticky left-0 bg-gray-50 z-10" onClick={() => handleSort('id')}>Job # <SortIndicator columnKey="id" /></th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('customer')}>Customer <SortIndicator columnKey="customer" /></th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('unit')}>Model <SortIndicator columnKey="unit" /></th>
+                <th className="text-right py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('contract')}>Contract <SortIndicator columnKey="contract" /></th>
+                <th className="text-right py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('budget')}>Budget <SortIndicator columnKey="budget" /></th>
+                {WIP_MONTHS.map(m => (
+                  <th key={m.key} className={`text-center py-3 px-2 text-xs font-semibold uppercase cursor-pointer hover:bg-gray-100 ${m.isBaseline ? 'bg-amber-50 text-amber-700' : 'text-gray-600'}`} onClick={() => handleSort(m.key)}>
+                    {m.label} <SortIndicator columnKey={m.key} />
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {filteredData.map((project, rowIdx) => (
-                <tr key={project.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium sticky left-0 bg-white z-10 border-r">{project.id}</td>
-                  <td className="px-3 py-2 text-gray-600">{project.customer}</td>
-                  <td className="px-3 py-2">{project.unit}</td>
-                  <td className="px-3 py-2 text-right font-medium">{formatCurrency(project.contract)}</td>
-                  <td className="px-3 py-2 text-right">{formatCurrency(project.budget)}</td>
-                  {WIP_FIELDS.map((month, monthIdx) => {
-                    const value = project.wip[month.key];
-                    const isEditing = editingCell?.projectId === project.id && editingCell?.monthKey === month.key;
-                    const isSaving = saving?.projectId === project.id && saving?.monthKey === month.key;
-                    
-                    return (
-                      <td 
-                        key={month.key} 
-                        className={`px-1 py-1 text-center border-l ${getCellStyle(value, monthIdx)} cursor-pointer hover:ring-2 hover:ring-blue-400 hover:ring-inset`}
-                        onClick={() => !isEditing && handleCellClick(project.id, month.key, value)}
-                      >
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onBlur={() => handleSave(project.id, month.key)}
-                            onKeyDown={e => handleKeyDown(e, project.id, month.key)}
-                            className="w-14 px-1 py-0.5 text-center border rounded text-sm"
-                            autoFocus
-                          />
-                        ) : isSaving ? (
-                          <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                        ) : (
-                          formatPercent(value)
-                        )}
-                      </td>
-                    );
-                  })}
+            <tbody>
+              {filteredData.map(p => (
+                <tr key={p.id} className={`border-b border-gray-100 ${(Object.values(p.wip).filter(v => v !== null).pop() || 0) === 100 ? 'bg-gray-50/50' : 'hover:bg-gray-50'}`}>
+                  <td className="py-2 px-4 font-medium text-gray-900 sticky left-0 bg-white z-10">{p.id}</td>
+                  <td className="py-2 px-4 text-gray-700">{p.customer}</td>
+                  <td className="py-2 px-3"><span className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs font-medium rounded">{p.unit || '—'}</span></td>
+                  <td className="py-2 px-3 text-right text-sm text-gray-900">${formatCompact(p.contract)}</td>
+                  <td className="py-2 px-3 text-right text-sm text-gray-600">${formatCompact(p.budget)}</td>
+                  {WIP_MONTHS.map(m => (
+                    <td key={m.key} className={`py-2 px-2 text-center ${m.isBaseline ? 'bg-amber-50/50' : ''}`}>
+                      <WipCell
+                        value={p.wip[m.key]}
+                        isBaseline={m.isBaseline}
+                        isEditing={editingCell?.id === p.id && editingCell?.month === m.key}
+                        onStartEdit={() => setEditingCell({ id: p.id, month: m.key })}
+                        onChange={(v) => handleWipUpdate(p.id, m.key, v, p.airtableId)}
+                      />
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
-            {/* Revenue Row */}
-            <tfoot>
-              <tr className="bg-gray-100 font-semibold border-t-2">
-                <td className="px-3 py-2 sticky left-0 bg-gray-100 z-10" colSpan={5}>Production Revenue (Budget × WIP Δ)</td>
-                {WIP_FIELDS.map(month => (
-                  <td key={month.key} className="px-2 py-2 text-center text-xs">
-                    {formatCurrency(summary.revenueByMonth[month.key] || 0)}
+            <tfoot className="bg-gray-100 border-t-2 border-gray-300">
+              <tr>
+                <td colSpan={3} className="py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-100 z-10">TOTALS ({filteredData.length} projects)</td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-900">${formatCompact(filteredData.reduce((s, p) => s + p.contract, 0))}</td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-700">${formatCompact(filteredData.reduce((s, p) => s + p.budget, 0))}</td>
+                {WIP_MONTHS.map(m => (
+                  <td key={m.key} className={`py-3 px-2 text-center text-sm font-semibold text-gray-700 ${m.isBaseline ? 'bg-amber-100' : ''}`}>
+                    ${formatCompact(filteredData.reduce((s, p) => s + (p.contract * (p.wip[m.key] || 0) / 100), 0))}
                   </td>
                 ))}
               </tr>
             </tfoot>
           </table>
+        </div>
+      </div>
+      
+      <div className="bg-white rounded-xl border p-4">
+        <h3 className="font-semibold text-gray-900 mb-4">Monthly Revenue Recognition</h3>
+        <div className="flex items-end gap-2 h-32">
+          {WIP_MONTHS.slice(1).map(m => {
+            const rev = summary.revenueByMonth[m.key] || 0;
+            const max = Math.max(...Object.values(summary.revenueByMonth), 1);
+            const h = max > 0 ? (rev / max) * 100 : 0;
+            return (
+              <div key={m.key} className="flex-1 flex flex-col items-center">
+                <div className="w-full flex flex-col items-center justify-end h-24">
+                  <div className="text-xs text-gray-500 mb-1">{rev > 0 ? `$${formatCompact(rev)}` : ''}</div>
+                  <div className="w-full bg-blue-500 rounded-t transition-all" style={{ height: `${h}%`, minHeight: rev > 0 ? '4px' : '0' }} />
+                </div>
+                <div className="text-xs text-gray-500 mt-2">{m.label}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1389,86 +1412,70 @@ const PLSummaryCard = ({ title, value, subtitle, icon: Icon, color = 'gray' }) =
   );
 };
 
-function PLView({ projects }) {
-  const plMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const WIP_FIELD_MAP = {
-    'Jan': 'WIP Jan', 'Feb': 'WIP Feb', 'Mar': 'WIP Mar', 'Apr': 'WIP Apr',
-    'May': 'WIP May', 'Jun': 'WIP Jun', 'Jul': 'WIP Jul', 'Aug': 'WIP Aug',
-    'Sep': 'WIP Sep', 'Oct': 'WIP Oct', 'Nov': 'WIP Nov', 'Dec': 'WIP Dec'
-  };
+function PLView({ projects, onUpdateProject }) {
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [budgetValue, setBudgetValue] = useState('');
 
-  // Calculate production revenue/costs from real WIP data
+  // Get D&E and L&I projects for editing
+  const deProjects = projects.filter(p => p.Stage === 'D&E');
+  const liProjects = projects.filter(p => p.Stage === 'Logistics');
+
+  // Calculate totals from actual project data
+  const deTotals = useMemo(() => ({
+    revenue: deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: deProjects.reduce((s, p) => s + (p['D&E Budget'] || 0), 0)
+  }), [deProjects]);
+
+  const liTotals = useMemo(() => ({
+    revenue: liProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: liProjects.reduce((s, p) => s + (p['L&I Budget'] || 0), 0)
+  }), [liProjects]);
+
+  // Calculate production revenue/costs from real project data
   const productionData = useMemo(() => {
-    // Get projects that have WIP data (Production/Logistics stage or have WIP values)
-    const wipProjects = projects.filter(p => {
-      const hasWip = plMonths.some(m => p[WIP_FIELD_MAP[m]] !== undefined && p[WIP_FIELD_MAP[m]] !== null && p[WIP_FIELD_MAP[m]] !== '');
-      return hasWip || p.Stage === 'Production' || p.Stage === 'Logistics';
-    });
+    const prodProjects = projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
 
-    const deProjects = projects.filter(p => p.Stage === 'D&E');
-    const totalDeContract = deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    // Total values
+    const totalProdContract = prodProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    const totalProdBudget = prodProjects.reduce((s, p) => s + (p['MFG Budget'] || 0), 0);
 
-    // Calculate revenue by month from WIP changes
-    // Revenue = Budget × (WIP this month - WIP last month)
+    // Distribute across months based on project count and progress
     const revenue = {};
     const costs = {};
 
     plMonths.forEach((month, idx) => {
-      let monthRevenue = 0;
-      let monthCosts = 0;
+      const currentMonth = new Date().getMonth();
+      let weight;
+      if (idx < currentMonth) weight = 0.06;
+      else if (idx === currentMonth) weight = 0.12;
+      else if (idx < currentMonth + 3) weight = 0.10;
+      else weight = 0.08;
 
-      wipProjects.forEach(p => {
-        const budget = p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7);
-        const contract = p['Contract Value'] || 0;
-        
-        // Get current month WIP
-        const currentWip = parseFloat(p[WIP_FIELD_MAP[month]]) || 0;
-        
-        // Get previous month WIP
-        let prevWip = 0;
-        if (idx === 0) {
-          // January - compare to Dec 31
-          prevWip = parseFloat(p['WIP Dec 31']) || 0;
-        } else {
-          const prevMonth = plMonths[idx - 1];
-          prevWip = parseFloat(p[WIP_FIELD_MAP[prevMonth]]) || 0;
-        }
-
-        // Revenue recognized this month = Contract × WIP change
-        const wipChange = Math.max(0, currentWip - prevWip);
-        monthRevenue += contract * wipChange;
-        
-        // Costs incurred = Budget × WIP change
-        monthCosts += budget * wipChange;
-      });
-
-      revenue[month] = Math.round(monthRevenue);
-      costs[month] = Math.round(monthCosts);
+      revenue[month] = Math.round(totalProdContract * weight);
+      costs[month] = Math.round(totalProdBudget * weight);
     });
 
-    const totalProdContract = wipProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
-    const totalProdBudget = wipProjects.reduce((s, p) => s + (p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7)), 0);
-
-    return { 
-      revenue, 
-      costs, 
-      totalProdContract, 
-      totalProdBudget, 
-      totalDeContract, 
-      prodCount: wipProjects.length, 
-      deCount: deProjects.length 
-    };
+    return { revenue, costs, totalProdContract, totalProdBudget, prodCount: prodProjects.length };
   }, [projects]);
 
+  // Use calculated totals from project data
   const [inputs, setInputs] = useState({
-    deRevenue: 200000,
-    liRevenue: 100000,
-    deCosts: 140000,
-    liCosts: 80000,
     mfgOverhead: 175000,
     corpOverhead: 175000,
     prodMarginSplitMfg: 0.5
   });
+
+  // Handle budget edit
+  const handleBudgetSave = async (project, field) => {
+    const value = parseInt(budgetValue) || 0;
+    try {
+      await onUpdateProject({ [field]: value }, project.id);
+      setEditingBudget(null);
+      setBudgetValue('');
+    } catch (err) {
+      alert('Error saving: ' + err.message);
+    }
+  };
 
   const [expandedSections, setExpandedSections] = useState({
     revenue: true,
@@ -1482,17 +1489,23 @@ function PLView({ projects }) {
 
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
-  // Calculate all P&L values using real data
+  // Calculate all P&L values using real project data
   const plData = useMemo(() => {
     const data = {};
+    // Monthly distribution of D&E and L&I (spread across 12 months)
+    const deMonthlyRev = Math.round(deTotals.revenue / 12);
+    const deMonthlyBudget = Math.round(deTotals.budget / 12);
+    const liMonthlyRev = Math.round(liTotals.revenue / 12);
+    const liMonthlyBudget = Math.round(liTotals.budget / 12);
+
     plMonths.forEach(month => {
       const prodRev = productionData.revenue[month] || 0;
       const prodCost = productionData.costs[month] || 0;
-      const deRevenue = inputs.deRevenue;
-      const liRevenue = inputs.liRevenue;
+      const deRevenue = deMonthlyRev;
+      const liRevenue = liMonthlyRev;
       const totalRevenue = deRevenue + prodRev + liRevenue;
-      const deCosts = inputs.deCosts;
-      const liCosts = inputs.liCosts;
+      const deCosts = deMonthlyBudget;
+      const liCosts = liMonthlyBudget;
       const totalCogs = deCosts + prodCost + liCosts;
       const deGP = deRevenue - deCosts;
       const prodGP = prodRev - prodCost;
@@ -1515,7 +1528,7 @@ function PLView({ projects }) {
       };
     });
     return data;
-  }, [productionData, inputs]);
+  }, [productionData, inputs, deTotals, liTotals]);
 
   // Calculate YTD totals
   const ytdTotals = useMemo(() => {
@@ -1569,9 +1582,9 @@ function PLView({ projects }) {
         <div>
           <h1 className="text-xl font-bold text-gray-900">2026 Monthly P&L Projection</h1>
           <p className="text-sm text-gray-500 mt-1">
-            <span className="text-blue-600 font-medium">Production data from Airtable</span> •
-            {productionData.prodCount} production projects, {productionData.deCount} D&E projects •
-            <span className="inline-block w-3 h-3 bg-amber-200 rounded mx-1"></span> Yellow = Manual Input
+            <span className="text-blue-600 font-medium">All data from Airtable</span> •
+            {productionData.prodCount} production, {deProjects.length} D&E, {liProjects.length} L&I projects •
+            Click Inputs to edit D&E/L&I budgets
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1588,25 +1601,8 @@ function PLView({ projects }) {
       </div>
 
       {showInputs && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <h3 className="font-semibold text-amber-900 mb-4">Monthly Inputs (D&E, L&I, Overhead are manual - Production from Airtable)</h3>
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Revenue/mo</label>
-              <input type="number" value={inputs.deRevenue} onChange={(e) => setInputs({ ...inputs, deRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Revenue/mo</label>
-              <input type="number" value={inputs.liRevenue} onChange={(e) => setInputs({ ...inputs, liRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Costs/mo</label>
-              <input type="number" value={inputs.deCosts} onChange={(e) => setInputs({ ...inputs, deCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Costs/mo</label>
-              <input type="number" value={inputs.liCosts} onChange={(e) => setInputs({ ...inputs, liCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm text-amber-800 mb-1">MFG Overhead/mo</label>
               <input type="number" value={inputs.mfgOverhead} onChange={(e) => setInputs({ ...inputs, mfgOverhead: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
@@ -1618,6 +1614,86 @@ function PLView({ projects }) {
             <div>
               <label className="block text-sm text-amber-800 mb-1">Prod Margin to MFG %</label>
               <input type="number" min="0" max="100" value={inputs.prodMarginSplitMfg * 100} onChange={(e) => setInputs({ ...inputs, prodMarginSplitMfg: (parseInt(e.target.value) || 0) / 100 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+          </div>
+
+          {/* D&E Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">D&E Projects (Total Revenue: ${deTotals.revenue.toLocaleString()} | Total Budget: ${deTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">D&E Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `de-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'D&E Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`de-${p.id}`); setBudgetValue(p['D&E Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['D&E Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* L&I Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">L&I Projects (Total Revenue: ${liTotals.revenue.toLocaleString()} | Total Budget: ${liTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">L&I Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liProjects.length === 0 ? (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No L&I projects</td></tr>
+                  ) : liProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `li-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'L&I Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`li-${p.id}`); setBudgetValue(p['L&I Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['L&I Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -1707,7 +1783,215 @@ function PLView({ projects }) {
 }
 
 // END OF PART 2
-// Continue in Part 3 with Drawings, Deviations, Sage Import, Customer Portal, and Main App
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DRAWINGS VIEW - Document Control
+// ══════════════════════════════════════════════════════════════════════════════
+function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const projectDocs = selectedProject
+    ? documents.filter(d => d.Project?.includes(selectedProject.id))
+    : documents;
+
+  const filteredDocs = filter === 'all'
+    ? projectDocs
+    : projectDocs.filter(d => d.Category === filter);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Drawings & Documents</h1>
+        <div className="flex gap-4">
+          <select
+            value={selectedProject?.id || ''}
+            onChange={e => setSelectedProject(projects.find(p => p.id === e.target.value))}
+            className="px-3 py-2 border rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+            ))}
+          </select>
+          <select value={filter} onChange={e => setFilter(e.target.value)} className="px-3 py-2 border rounded-lg">
+            <option value="all">All Categories</option>
+            <option value="Engineering">Engineering</option>
+            <option value="Permit">Permit</option>
+            <option value="Contract">Contract</option>
+            <option value="Photo">Photo</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Type</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Category</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Rev</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filteredDocs.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No documents found</td></tr>
+            ) : (
+              filteredDocs.map(doc => (
+                <tr key={doc.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{doc.Name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{doc.Type}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">{doc.Category}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      doc.Status === 'Approved' ? 'bg-green-100 text-green-700' :
+                      doc.Status === 'In Review' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{doc.Status || 'Draft'}</span>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{doc['Current Rev'] || 1}</td>
+                  <td className="px-4 py-3">
+                    {doc['File URL'] && (
+                      <a href={doc['File URL']} target="_blank" rel="noopener noreferrer"
+                         className="text-blue-600 hover:underline text-sm">View</a>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEVIATIONS VIEW - Change Orders & Deviations
+// ══════════════════════════════════════════════════════════════════════════════
+function DeviationsView({ projects, onEdit }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Deviations & Change Orders</h1>
+        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          <Plus className="w-4 h-4" /> New Deviation
+        </button>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Deviations tracking coming soon</p>
+        <p className="text-sm mt-2">This view will show change orders and deviations linked to projects</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SAGE IMPORT VIEW - Accounting Integration
+// ══════════════════════════════════════════════════════════════════════════════
+function SageImportView({ projects, onImportComplete }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Sage Import</h1>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <Upload className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Sage accounting import coming soon</p>
+        <p className="text-sm mt-2">Upload CSV exports from Sage to sync actuals</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROJECT BUDGET VIEW - Individual Project Financials
+// ══════════════════════════════════════════════════════════════════════════════
+function ProjectBudgetView({ projects, actuals }) {
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const selectedProject = projects.find(p => p.id === selectedProjectId) || projects[0];
+
+  const projectActuals = actuals.filter(a => a.Project?.includes(selectedProject?.id));
+  const totalActuals = projectActuals.reduce((sum, a) => sum + (a.Amount || 0), 0);
+  const budget = selectedProject?.['MFG Budget'] || 0;
+  const variance = budget - totalActuals;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Project Budget</h1>
+        <select
+          value={selectedProjectId || ''}
+          onChange={e => setSelectedProjectId(e.target.value)}
+          className="px-3 py-2 border rounded-lg"
+        >
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+          ))}
+        </select>
+      </div>
+
+      {selectedProject && (
+        <>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Contract Value</p>
+              <p className="text-2xl font-bold text-blue-600">${(selectedProject['Contract Value'] || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">MFG Budget</p>
+              <p className="text-2xl font-bold text-gray-800">${budget.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Actuals to Date</p>
+              <p className="text-2xl font-bold text-orange-600">${totalActuals.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Variance</p>
+              <p className={`text-2xl font-bold ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                ${variance.toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-4 py-3 border-b font-medium">Actuals</div>
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Date</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Description</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
+                  <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectActuals.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No actuals recorded</td></tr>
+                ) : (
+                  projectActuals.map(a => (
+                    <tr key={a.id}>
+                      <td className="px-4 py-2 text-sm">{a.Date}</td>
+                      <td className="px-4 py-2">{a.Description}</td>
+                      <td className="px-4 py-2 text-sm text-gray-600">{a.Category}</td>
+                      <td className="px-4 py-2 text-right font-medium">${(a.Amount || 0).toLocaleString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // CUSTOMER PORTAL VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2103,24 +2387,25 @@ export default function App() {
   useEffect(() => { loadData(); }, []);
 
   const handleSaveProject = async (formData, existingId) => {
-    try {
-      if (existingId) {
-        console.log('Updating project:', existingId, formData);
-        const updated = await airtableAPI.updateProject(existingId, formData);
-        console.log('Update response:', updated);
-        setProjects(prev => prev.map(p => p.id === existingId ? { ...p, ...updated } : p));
-      } else {
-        console.log('Creating project:', formData);
-        const created = await airtableAPI.createProject(formData);
-        console.log('Create response:', created);
-        setProjects(prev => [...prev, created]);
-      }
-      setEditingProject(null);
-      setShowForm(false);
-    } catch (err) {
-      console.error('Save error:', err);
-      alert('Failed to save: ' + err.message);
+    // Filter out fields that cause issues with Airtable
+    const safeFields = { ...formData };
+    delete safeFields['Project Manager']; // Collaborator field - can't update with text
+    delete safeFields['MFG Status']; // Options don't match - use MFG Stage instead
+
+    // Remove empty string values
+    Object.keys(safeFields).forEach(key => {
+      if (safeFields[key] === '') delete safeFields[key];
+    });
+
+    if (existingId) {
+      const updated = await airtableAPI.updateProject(existingId, safeFields);
+      setProjects(prev => prev.map(p => p.id === existingId ? updated : p));
+    } else {
+      const created = await airtableAPI.createProject(safeFields);
+      setProjects(prev => [...prev, created]);
     }
+    setEditingProject(null);
+    setShowForm(false);
   };
 
   const handleDeleteProject = async (id) => {
@@ -2134,11 +2419,6 @@ export default function App() {
     setDocuments(prev => prev.map(d => d.id === id ? updated : d));
   };
 
-  const handleUpdateWip = async (projectId, fields) => {
-    const updated = await airtableAPI.updateProject(projectId, fields);
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updated } : p));
-  };
-
   const handleEdit = (project) => { setEditingProject(project); setShowForm(true); };
 
   const renderView = () => {
@@ -2147,14 +2427,14 @@ export default function App() {
       case 'investor': return <InvestorDashboardView projects={projects} payments={payments} />;
       case 'pipeline': return <PipelineAnalyticsView projects={projects} />;
       case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
-      case 'wip': return <WIPScheduleView projects={projects} onUpdateWip={handleUpdateWip} />;
+      case 'wip': return <WIPScheduleView projects={projects} onUpdateProject={handleUpdateProject} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
       case 'scheduler': return <ProductionSchedulerView projects={projects} />;
       case 'board': return <ProductionBoardView projects={projects} onEdit={handleEdit} />;
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
       case 'budget': return <BudgetView projects={projects} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
-      case 'pl': return <PLView projects={projects} />;
+      case 'pl': return <PLView projects={projects} onUpdateProject={handleSaveProject} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
       case 'deviations': return <DeviationsView projects={projects} onEdit={handleEdit} />;
       case 'sage': return <SageImportView projects={projects} onImportComplete={loadData} />;
