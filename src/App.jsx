@@ -3090,7 +3090,23 @@ export default function App() {
               <X className="w-6 h-6" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-1">
+          {/* Mobile Role Selector */}
+          <div className="px-4 pt-4 pb-2">
+            <div className="text-xs text-slate-500 uppercase font-semibold mb-2 px-1">Role</div>
+            <select
+              value={role}
+              onChange={e => handleRoleChange(e.target.value)}
+              className="w-full bg-slate-800 text-white border border-slate-600 rounded-lg px-3 py-2.5 text-sm"
+            >
+              {Object.entries(ROLES).map(([roleId, roleData]) => (
+                <option key={roleId} value={roleId}>{roleData.name} — {roleData.description}</option>
+              ))}
+            </select>
+          </div>
+          <div className="px-4 pt-2 pb-1">
+            <div className="text-xs text-slate-500 uppercase font-semibold px-1">Views</div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-1">
             {navItems.map(item => (
               <button
                 key={item.id}
