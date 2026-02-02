@@ -3078,40 +3078,58 @@ export default function App() {
         {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
 
-      {/* Sidebar */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-white transform transition-transform lg:transform-none ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b border-slate-700 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">Honomobo</h1>
-            <p className="text-slate-400 text-sm">Operations Platform</p>
+      {/* Mobile Navigation - Full Screen Overlay */}
+      {sidebarOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 bg-slate-900 flex flex-col">
+          <div className="p-6 border-b border-slate-700 flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-white">Honomobo</h1>
+              <p className="text-slate-400 text-sm">Operations Platform</p>
+            </div>
+            <button onClick={() => setSidebarOpen(false)} className="text-slate-400 hover:text-white p-2">
+              <X className="w-6 h-6" />
+            </button>
           </div>
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex-1 overflow-y-auto p-4 space-y-1">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => { setView(item.id); setSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${view === item.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              >
+                <item.icon className="w-5 h-5 flex-shrink-0" />
+                <span className="text-base">{item.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="p-4 border-t border-slate-700">
+            <div className="text-xs text-slate-400">{projects.length} projects loaded</div>
+          </div>
         </div>
-        <nav className="p-4 space-y-1 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)', WebkitOverflowScrolling: 'touch' }}>
+      )}
+
+      {/* Desktop Sidebar */}
+      <aside className="hidden lg:flex lg:flex-col w-64 bg-slate-900 text-white">
+        <div className="p-6 border-b border-slate-700">
+          <h1 className="text-xl font-bold">Honomobo</h1>
+          <p className="text-slate-400 text-sm">Operations Platform</p>
+        </div>
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map(item => (
             <button
               key={item.id}
               onClick={() => { setView(item.id); setSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${view === item.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${view === item.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
             >
               <item.icon className="w-5 h-5 flex-shrink-0" />
               <span className="text-sm">{item.label}</span>
             </button>
           ))}
-          {/* Spacer so last items aren't hidden behind footer */}
-          <div className="h-16" />
         </nav>
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700 bg-slate-900">
-          <div className="text-xs text-slate-400">
-            {projects.length} projects loaded
-          </div>
+        <div className="p-4 border-t border-slate-700">
+          <div className="text-xs text-slate-400">{projects.length} projects loaded</div>
         </div>
       </aside>
-
-      {/* Overlay */}
-      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Main Content */}
       <main className="flex-1 min-w-0">
