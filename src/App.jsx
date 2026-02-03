@@ -163,7 +163,40 @@ const airtableAPI = {
     if (!res.ok) throw new Error('Failed to create tasks batch');
     const data = await res.json();
     return data.records.map(r => ({ id: r.id, ...r.fields }));
+  },
+  async fetchModels() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Models`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
   }
+};
+
+// Global models lookup - populated on load
+let modelsLookup = {};
+
+// Helper to get model name from project (handles both linked record and plain string)
+const getModelName = (project) => {
+  if (!project) return '';
+  const modelField = project['Model'];
+
+  // If Model is an array (linked record), look up the name
+  if (Array.isArray(modelField) && modelField.length > 0) {
+    const modelId = modelField[0];
+    const modelRecord = modelsLookup[modelId];
+    return modelRecord?.Name || modelRecord?.['Model Name'] || '';
+  }
+
+  // If Model is a string, use it directly
+  if (typeof modelField === 'string') {
+    return modelField;
+  }
+
+  // Fallback to Unit Type
+  return project['Unit Type'] || '';
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -174,18 +207,19 @@ const formatCompact = v => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 
 
 // Get mod count from Model/Unit Type (HO2=2, HO3=3, HO5=5, HS6=6, HS8=8, SO1=1, etc.)
 const getModCountFromModel = (project) => {
-  const model = (project?.['Model'] || project?.['Unit Type'] || '').toUpperCase();
-  
+  // Use getModelName to handle both linked records and plain strings
+  const model = getModelName(project).toUpperCase();
+
   // Extract number from model name (HO2, HO3, HO4, HO5, HS6, HS8, HS12, SO1)
   const match = model.match(/(HO|HS|SO)(\d+)/);
   if (match) {
     return parseInt(match[2]) || 1;
   }
-  
+
   // Special cases
   if (model.includes('BATH') || model.includes('BAR')) return 1;
   if (model.includes('PD')) return 5; // Pod?
-  
+
   // Default
   return 1;
 };
@@ -275,7 +309,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'MFG Week': project?.['MFG Week'] || '',
     'MFG Status': project?.['MFG Status'] || '',
     'Project Manager': project?.['Project Manager'] || '',
-    'Model': project?.['Model'] || '',
+    'Model': getModelName(project) || '',
   });
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -558,7 +592,7 @@ function DashboardView({ projects, onEdit }) {
               <tr key={p.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(p)}>
                 <td className="px-6 py-4">
                   <div className="font-medium">{p['Project ID']}</div>
-                  <div className="text-sm text-gray-500">{p['Model'] || p['Unit Type'] || ''}</div>
+                  <div className="text-sm text-gray-500">{getModelName(p)}</div>
                 </td>
                 <td className="px-6 py-4">
                   <span className="px-2 py-1 text-xs rounded-full" style={{ backgroundColor: `${stageColors[p.Stage]}20`, color: stageColors[p.Stage] }}>
@@ -614,7 +648,7 @@ function WIPScheduleView({ projects, onUpdateWip }) {
         return {
           id: p['Project ID'] || '',
           customer: p['Status'] || p['Customer (text)'] || p['Customer'] || '',
-          unit: p['Model'] || p['Unit Type'] || '',
+          unit: getModelName(p),
           contract: p['Contract Value'] || 0,
           budget: p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
           wip,
@@ -986,7 +1020,7 @@ function JobScheduleView({ projects, onEdit }) {
                 <td className="px-6 py-4 font-medium">{p['Project ID']}</td>
                 <td className="px-6 py-4 text-sm text-gray-700">{p['Status'] || p['Customer (text)'] || '—'}</td>
                 <td className="px-6 py-4 text-sm">
-                  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{p['Model'] || p['Unit Type'] || '—'}</span>
+                  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{getModelName(p) || '—'}</span>
                 </td>
                 <td className="px-6 py-4">
                   <span className={`px-2 py-1 text-xs rounded-full ${
@@ -1101,7 +1135,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
             </div>
             <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Status'] || ''}</div>
             <div className="flex items-center justify-between">
-              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Model'] || '—'}</span>
+              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{getModelName(projects[0]) || '—'}</span>
               {projects[0]['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{projects[0]['MFG Week']}</span>}
             </div>
             {!isSmall && projects[0]['MFG Week'] && (
@@ -1122,7 +1156,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-sm">{p['Project ID']}</span>
-                      <span className="text-xs text-gray-400">{p['Model'] || '—'}</span>
+                      <span className="text-xs text-gray-400">{getModelName(p) || '—'}</span>
                     </div>
                     <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
                   </div>
@@ -1190,7 +1224,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
               <div key={p.id} className="bg-white rounded-lg p-3 border border-red-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                 <div className="font-semibold text-sm">{p['Project ID']}</div>
                 <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
-                <div className="text-xs text-red-600 mt-1">{p['Model'] || '—'}</div>
+                <div className="text-xs text-red-600 mt-1">{getModelName(p) || '—'}</div>
               </div>
             ))}
           </div>
@@ -1249,7 +1283,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                 {productionProjects.filter(p => !p['Bay Assignment']).map(p => (
                   <div key={p.id} className="bg-white rounded-lg p-3 border border-amber-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                     <div className="font-semibold text-sm">{p['Project ID']}</div>
-                    <div className="text-xs text-gray-500">{p['Model'] || '—'}</div>
+                    <div className="text-xs text-gray-500">{getModelName(p) || '—'}</div>
                   </div>
                 ))}
               </div>
@@ -1275,7 +1309,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                       <div className="font-semibold text-gray-900">{p['Project ID']}</div>
                       <div className="text-sm text-gray-500">{p['Status'] || ''}</div>
                       <div className="mt-2 flex items-center justify-between">
-                        <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{p['Model'] || '—'}</span>
+                        <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{getModelName(p) || '—'}</span>
                         <span className="text-xs text-gray-400">{p['Bay Assignment'] || 'No Pos'}</span>
                       </div>
                       {p['MFG Week'] && (
@@ -1332,7 +1366,7 @@ function ProductionSchedulerView({ projects }) {
           if (mfgWeek > 0) { startWeek = -mfgWeek; status = mfgWeek < 12 ? 'in_progress' : 'complete'; }
           else { startWeek = 0; status = 'scheduled'; }
         }
-        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'] };
+        return { id: p['Project ID'], name: p['Status'] || '', model: getModelName(p), market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'] };
       });
   }, [projects]);
 
@@ -1514,7 +1548,7 @@ function CapacityPlanningView({ projects }) {
     const analysis = projects.map(p => {
       const stage = p.Stage;
       const contractValue = p['Contract Value'] || 0;
-      const model = p['Model'] || 'Unknown';
+      const model = getModelName(p) || 'Unknown';
       
       // Estimate modules based on model
       let modules = 1;
@@ -2374,7 +2408,7 @@ function ProjectBudgetView({ projects, actuals }) {
         <div className="bg-slate-800 text-white px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xl font-bold">{selectedProject['Project ID']} BUILD - {selectedProject['Model'] || selectedProject['Unit Type'] || 'Unknown'}</h3>
+              <h3 className="text-xl font-bold">{selectedProject['Project ID']} BUILD - {getModelName(selectedProject) || 'Unknown'}</h3>
               <p className="text-slate-300">{selectedProject['Status'] || selectedProject['Customer (text)'] || ''}</p>
             </div>
             <div className="text-right">
@@ -3588,7 +3622,7 @@ function CustomerPortalView({ projects, documents, payments }) {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="text-slate-400 text-sm mb-1">Your Home</div>
-              <h1 className="text-3xl font-bold mb-2">{selectedProject['Model'] || selectedProject['Unit Type'] || 'Honomobo Home'}</h1>
+              <h1 className="text-3xl font-bold mb-2">{getModelName(selectedProject) || 'Honomobo Home'}</h1>
               <div className="flex items-center gap-4 text-slate-300 text-sm">
                 <span>{selectedProject['Site State/Province'] || '—'}</span>
                 <span>•</span>
@@ -3649,7 +3683,7 @@ function CustomerPortalView({ projects, documents, payments }) {
               <h3 className="font-semibold mb-4">Project Details</h3>
               <div className="space-y-3">
                 <div className="flex justify-between"><span className="text-gray-500">Project ID</span><span className="font-medium">{selectedProject['Project ID']}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Model</span><span>{selectedProject['Model'] || selectedProject['Unit Type'] || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Model</span><span>{getModelName(selectedProject) || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Location</span><span>{selectedProject['Site State/Province'] || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Stage</span><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-sm">{selectedProject.Stage}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Project Manager</span><span>{selectedProject['Project Manager'] || '—'}</span></div>
@@ -3976,7 +4010,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
 
                 {/* Model */}
                 <div className="col-span-1">
-                  <span className="text-sm font-medium">{project['Model'] || project['Unit Type'] || '—'}</span>
+                  <span className="text-sm font-medium">{getModelName(project) || '—'}</span>
                 </div>
 
                 {/* Stage */}
@@ -4151,6 +4185,7 @@ export default function App() {
   const [actuals, setActuals] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -4178,20 +4213,25 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [projData, docData, paymentData, actualsData, tasksData, teamData] = await Promise.all([
+      const [projData, docData, paymentData, actualsData, tasksData, teamData, modelsData] = await Promise.all([
         airtableAPI.fetchProjects(),
         airtableAPI.fetchDocuments(),
         airtableAPI.fetchPayments(),
         airtableAPI.fetchActuals(),
         airtableAPI.fetchTasks(),
         airtableAPI.fetchTeamMembers(),
+        airtableAPI.fetchModels(),
       ]);
+      // Populate the global modelsLookup for getModelName helper
+      modelsLookup = {};
+      modelsData.forEach(m => { modelsLookup[m.id] = m; });
       setProjects(projData);
       setDocuments(docData);
       setPayments(paymentData);
       setActuals(actualsData);
       setTasks(tasksData);
       setTeamMembers(teamData);
+      setModels(modelsData);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -4230,9 +4270,20 @@ export default function App() {
       if (hasValue(formData['Project Manager'])) {
         cleanedData['Project Manager'] = formData['Project Manager'];
       }
-      // Model / Unit Type
+      // Model / Unit Type - convert to linked record format if models are loaded
       if (hasValue(formData['Model'])) {
-        cleanedData['Model'] = formData['Model'];
+        const modelName = formData['Model'];
+        // Look up model record ID by name
+        const modelRecord = Object.values(modelsLookup).find(m =>
+          m.Name === modelName || m['Model Name'] === modelName
+        );
+        if (modelRecord) {
+          // Send as linked record array
+          cleanedData['Model'] = [modelRecord.id];
+        } else {
+          // If no matching record found, try sending as-is (might be single select)
+          cleanedData['Model'] = modelName;
+        }
       }
       
       // Handle numeric fields - convert and only include if valid
@@ -4959,7 +5010,7 @@ function KPIDashboardView({ projects, payments }) {
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium">{item['Project ID'] || item['Name'] || '—'}</td>
                     <td className="px-4 py-2 text-sm text-gray-600">{item['Status'] || item['Customer'] || '—'}</td>
-                    <td className="px-4 py-2 text-sm">{item['Model'] || item['Type'] || '—'}</td>
+                    <td className="px-4 py-2 text-sm">{getModelName(item) || item['Type'] || '—'}</td>
                     <td className="px-4 py-2 text-center text-sm">{getModCount(item)}</td>
                     <td className="px-4 py-2 text-right text-sm">{formatCurrency(item['Gross Margin'] || item['Amount'] || item['Contract Value'] || 0)}</td>
                   </tr>
@@ -5459,7 +5510,7 @@ function PipelineAnalyticsView({ projects }) {
 
   // Get model type
   const getModel = (p) => {
-    const model = p['Model'] || p['Unit Type'] || '';
+    const model = getModelName(p);
     const match = model.match(/(HO2|HO3|HO4|HO5|HS6|HS8|SO1)/i);
     return match ? match[1].toUpperCase() : 'Other';
   };
