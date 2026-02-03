@@ -264,7 +264,7 @@ const WAITING_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone === '
 // ══════════════════════════════════════════════════════════════════════════════
 // PROJECT FORM MODAL - Updated with 18 positions
 // ══════════════════════════════════════════════════════════════════════════════
-function ProjectFormModal({ project, onSave, onClose }) {
+function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const [form, setForm] = useState({
     'Project ID': project?.['Project ID'] || '',
     'Project Name': project?.['Project Name'] || '',
@@ -277,6 +277,8 @@ function ProjectFormModal({ project, onSave, onClose }) {
     'Project Manager': project?.['Project Manager'] || '',
   });
   const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const positions = ['', ...POSITION_IDS];
   const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
@@ -292,6 +294,18 @@ function ProjectFormModal({ project, onSave, onClose }) {
       alert('Error: ' + err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await onDelete(project.id);
+      onClose();
+    } catch (err) {
+      alert('Error deleting: ' + err.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -365,7 +379,27 @@ function ProjectFormModal({ project, onSave, onClose }) {
               </div>
             </>
           )}
+          
+          {/* Delete confirmation */}
+          {showDeleteConfirm && project && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="text-red-800 font-medium mb-2">Delete this project?</div>
+              <div className="text-sm text-red-600 mb-3">This will permanently delete {project['Project ID']}. This action cannot be undone.</div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowDeleteConfirm(false)} className="px-4 py-2 border rounded-lg hover:bg-white">Cancel</button>
+                <button type="button" onClick={handleDelete} disabled={deleting} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
+                  {deleting ? 'Deleting...' : 'Yes, Delete'}
+                </button>
+              </div>
+            </div>
+          )}
+          
           <div className="flex gap-3 pt-4">
+            {project && !showDeleteConfirm && (
+              <button type="button" onClick={() => setShowDeleteConfirm(true)} className="px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
             <button type="button" onClick={onClose} className="flex-1 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
             <button type="submit" disabled={saving} className="flex-1 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 hover:bg-blue-700">
               {saving ? 'Saving...' : 'Save'}
@@ -4228,9 +4262,15 @@ export default function App() {
   };
 
   const handleDeleteProject = async (id) => {
-    if (!confirm('Delete this project?')) return;
-    await airtableAPI.deleteProject(id);
-    setProjects(prev => prev.filter(p => p.id !== id));
+    try {
+      await airtableAPI.deleteProject(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+      setEditingProject(null);
+      setShowForm(false);
+    } catch (err) {
+      console.error('Delete error:', err);
+      throw err;
+    }
   };
 
   const handleUpdateDocument = async (id, fields) => {
@@ -4425,6 +4465,7 @@ export default function App() {
         <ProjectFormModal
           project={editingProject}
           onSave={handleSaveProject}
+          onDelete={handleDeleteProject}
           onClose={() => { setShowForm(false); setEditingProject(null); }}
         />
       )}
