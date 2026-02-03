@@ -115,6 +115,54 @@ const airtableAPI = {
       });
       if (!res.ok) throw new Error('Failed to update production order');
     }
+  },
+  async fetchTasks() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async fetchTeamMembers() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Team Members`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async createTask(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) throw new Error('Failed to create task');
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async updateTask(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) throw new Error('Failed to update task');
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async createTasksBatch(records) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records: records.map(r => ({ fields: r })) })
+    });
+    if (!res.ok) throw new Error('Failed to create tasks batch');
+    const data = await res.json();
+    return data.records.map(r => ({ id: r.id, ...r.fields }));
   }
 };
 
@@ -3307,6 +3355,7 @@ const allNavItems = [
   { id: 'investor', label: 'Investor Dashboard', icon: TrendingUp },
   { id: 'pipeline', label: 'Pipeline Analytics', icon: PieChart },
   { id: 'kpi', label: 'KPI Scorecard', icon: BarChart3 },
+  { id: 'design', label: 'Design & Engineering', icon: Pencil },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
   { id: 'jobs', label: 'Job Schedule', icon: Calendar },
   { id: 'queue', label: 'Production Queue', icon: ListOrdered },
@@ -3323,9 +3372,9 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'jobs', 'queue', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
-  de_manager: ['dashboard', 'pipeline', 'kpi', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'wip', 'jobs', 'queue', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  de_manager: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'drawings', 'deviations'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
   factory: ['floor', 'board', 'queue', 'scheduler'],
   qc: ['floor', 'board', 'drawings'],
   finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'budget', 'projectbudget', 'pl', 'sage', 'deviations'],
@@ -3393,6 +3442,8 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [payments, setPayments] = useState([]);
   const [actuals, setActuals] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -3420,16 +3471,20 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [projData, docData, paymentData, actualsData] = await Promise.all([
+      const [projData, docData, paymentData, actualsData, tasksData, teamData] = await Promise.all([
         airtableAPI.fetchProjects(),
         airtableAPI.fetchDocuments(),
         airtableAPI.fetchPayments(),
         airtableAPI.fetchActuals(),
+        airtableAPI.fetchTasks(),
+        airtableAPI.fetchTeamMembers(),
       ]);
       setProjects(projData);
       setDocuments(docData);
       setPayments(paymentData);
       setActuals(actualsData);
+      setTasks(tasksData);
+      setTeamMembers(teamData);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -3534,6 +3589,17 @@ export default function App() {
     }));
   };
 
+  const handleUpdateTask = async (taskId, fields) => {
+    const updated = await airtableAPI.updateTask(taskId, fields);
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updated } : t));
+  };
+
+  const handleCreateTask = async (fields) => {
+    const newTask = await airtableAPI.createTask(fields);
+    setTasks(prev => [...prev, newTask]);
+    return newTask;
+  };
+
   const handleEdit = (project) => { setEditingProject(project); setShowForm(true); };
 
   const renderView = () => {
@@ -3542,6 +3608,7 @@ export default function App() {
       case 'investor': return <InvestorDashboardView projects={projects} payments={payments} />;
       case 'pipeline': return <PipelineAnalyticsView projects={projects} />;
       case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
+      case 'design': return <DesignEngineeringView projects={projects} tasks={tasks} teamMembers={teamMembers} onUpdateTask={handleUpdateTask} onCreateTask={handleCreateTask} onRefresh={loadData} />;
       case 'wip': return <WIPScheduleView projects={projects} onUpdateWip={handleUpdateWip} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
       case 'queue': return <ProductionQueueView projects={projects} onUpdateOrder={handleUpdateProductionOrder} />;
@@ -4275,6 +4342,380 @@ const MODEL_COLORS = {
   'SO1': '#EF4444',
   'Other': '#6B7280',
 };
+
+// Design & Engineering View with Gantt Chart
+function DesignEngineeringView({ projects, tasks, teamMembers, onUpdateTask, onCreateTask, onRefresh }) {
+  const [phaseFilter, setPhaseFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('gantt');
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [expandedProjects, setExpandedProjects] = useState({});
+
+  // Filter projects in Concept, D&E, or Permitting stages
+  const deProjects = useMemo(() => {
+    return projects
+      .filter(p => ['Concept', 'D&E', 'Permitting'].includes(p.Stage))
+      .sort((a, b) => {
+        const getNum = (p) => {
+          const id = p['Project ID'] || '';
+          const match = id.match(/\d+/);
+          return match ? parseInt(match[0]) : 9999;
+        };
+        return getNum(a) - getNum(b);
+      });
+  }, [projects]);
+
+  // Filter by phase
+  const filteredProjects = useMemo(() => {
+    if (phaseFilter === 'all') return deProjects;
+    return deProjects.filter(p => p.Stage === phaseFilter);
+  }, [deProjects, phaseFilter]);
+
+  // Get tasks for a project
+  const getProjectTasks = (projectId) => {
+    return tasks.filter(t => {
+      const linked = t.Project;
+      if (Array.isArray(linked)) return linked.includes(projectId);
+      return linked === projectId;
+    });
+  };
+
+  // Toggle project expansion
+  const toggleProject = (projectId) => {
+    setExpandedProjects(prev => ({ ...prev, [projectId]: !prev[projectId] }));
+  };
+
+  // Generate date columns (16 weeks)
+  const dateColumns = useMemo(() => {
+    const cols = [];
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    for (let i = 0; i < 16; i++) {
+      const weekStart = new Date(startOfWeek);
+      weekStart.setDate(startOfWeek.getDate() + (i * 7));
+      cols.push({
+        date: weekStart,
+        label: weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      });
+    }
+    return cols;
+  }, []);
+
+  // Task templates by phase
+  const taskTemplates = {
+    Concept: [
+      { name: 'Initial Consultation', category: 'Planning', duration: 3 },
+      { name: 'Site Assessment', category: 'Site', duration: 5 },
+      { name: 'Concept Design', category: 'Design', duration: 10 },
+      { name: 'Budget Estimate', category: 'Budget', duration: 3 },
+      { name: 'Customer Review', category: 'Review', duration: 5 },
+    ],
+    'D&E': [
+      { name: 'Architectural Drawings', category: 'Design', duration: 15 },
+      { name: 'Structural Engineering', category: 'Engineering', duration: 10 },
+      { name: 'MEP Design', category: 'Engineering', duration: 10 },
+      { name: 'Energy Modeling', category: 'Engineering', duration: 5 },
+      { name: 'Design Review', category: 'Review', duration: 5 },
+      { name: 'Customer Approval', category: 'Review', duration: 3 },
+    ],
+    Permitting: [
+      { name: 'Permit Application Prep', category: 'Permitting', duration: 5 },
+      { name: 'Submit to AHJ', category: 'Permitting', duration: 2 },
+      { name: 'Plan Review', category: 'Permitting', duration: 20 },
+      { name: 'Revisions', category: 'Permitting', duration: 10 },
+      { name: 'Permit Issued', category: 'Permitting', duration: 2 },
+    ],
+  };
+
+  // Create tasks from template
+  const createTasksFromTemplate = async (project) => {
+    const phase = project.Stage;
+    const templates = taskTemplates[phase] || [];
+    if (templates.length === 0) return;
+
+    const today = new Date();
+    let currentDate = new Date(today);
+
+    for (const template of templates) {
+      const startDate = new Date(currentDate);
+      const dueDate = new Date(currentDate);
+      dueDate.setDate(dueDate.getDate() + template.duration);
+
+      await onCreateTask({
+        'Task Name': template.name,
+        'Phase': phase,
+        'Category': template.category,
+        'Status': 'Not Started',
+        'Start Date': startDate.toISOString().split('T')[0],
+        'Due Date': dueDate.toISOString().split('T')[0],
+        'Duration': template.duration,
+        'Percent Complete': 0,
+        'Project': [project.id],
+      });
+
+      currentDate = new Date(dueDate);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    onRefresh();
+  };
+
+  // Stats
+  const stats = useMemo(() => {
+    const projectTasks = filteredProjects.flatMap(p => getProjectTasks(p.id));
+    return {
+      totalProjects: filteredProjects.length,
+      totalTasks: projectTasks.length,
+      inProgress: projectTasks.filter(t => t.Status === 'In Progress').length,
+      completed: projectTasks.filter(t => t.Status === 'Complete').length,
+      blocked: projectTasks.filter(t => t.Status === 'Blocked').length,
+      overdue: projectTasks.filter(t => {
+        if (!t['Due Date'] || t.Status === 'Complete') return false;
+        return new Date(t['Due Date']) < new Date();
+      }).length,
+    };
+  }, [filteredProjects, tasks]);
+
+  // Status colors
+  const statusColors = {
+    'Not Started': 'bg-gray-200',
+    'In Progress': 'bg-blue-500',
+    'Complete': 'bg-green-500',
+    'Blocked': 'bg-red-500',
+    'On Hold': 'bg-yellow-500',
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Stats Bar */}
+      <div className="grid grid-cols-6 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-gray-900">{stats.totalProjects}</div>
+          <div className="text-sm text-gray-500">Projects</div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-gray-900">{stats.totalTasks}</div>
+          <div className="text-sm text-gray-500">Total Tasks</div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-blue-600">{stats.inProgress}</div>
+          <div className="text-sm text-gray-500">In Progress</div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-green-600">{stats.completed}</div>
+          <div className="text-sm text-gray-500">Completed</div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-red-600">{stats.blocked}</div>
+          <div className="text-sm text-gray-500">Blocked</div>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="text-3xl font-bold text-orange-600">{stats.overdue}</div>
+          <div className="text-sm text-gray-500">Overdue</div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <select
+            value={phaseFilter}
+            onChange={(e) => setPhaseFilter(e.target.value)}
+            className="px-4 py-2 border rounded-lg bg-white"
+          >
+            <option value="all">All Phases</option>
+            <option value="Concept">Concept</option>
+            <option value="D&E">D&E</option>
+            <option value="Permitting">Permitting</option>
+          </select>
+          <div className="flex border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode('gantt')}
+              className={`px-4 py-2 ${viewMode === 'gantt' ? 'bg-blue-600 text-white' : 'bg-white'}`}
+            >
+              <Calendar className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-4 py-2 ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white'}`}
+            >
+              <ClipboardList className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <div className="text-sm text-gray-500">
+          <span className="text-green-600">Live from Airtable</span> • {tasks.length} task templates available
+        </div>
+      </div>
+
+      {/* Gantt View */}
+      {viewMode === 'gantt' && (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b bg-gray-50">
+                  <th className="text-left p-4 font-medium text-gray-600 min-w-[300px]">Project / Task</th>
+                  {dateColumns.map((col, i) => (
+                    <th key={i} className="text-center p-2 font-medium text-gray-500 text-xs min-w-[60px]">
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProjects.map((project) => {
+                  const projectTasks = getProjectTasks(project.id);
+                  const isExpanded = expandedProjects[project.id];
+                  const stageColor = project.Stage === 'Concept' ? 'text-purple-600' :
+                                    project.Stage === 'D&E' ? 'text-blue-600' : 'text-yellow-600';
+
+                  return (
+                    <React.Fragment key={project.id}>
+                      {/* Project Row */}
+                      <tr className="border-b hover:bg-gray-50">
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => toggleProject(project.id)} className="p-1 hover:bg-gray-100 rounded">
+                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </button>
+                            <div className={`w-2 h-2 rounded-full ${stageColor === 'text-purple-600' ? 'bg-purple-600' : stageColor === 'text-blue-600' ? 'bg-blue-600' : 'bg-yellow-600'}`} />
+                            <div>
+                              <div className="font-semibold">{project['Project ID']}</div>
+                              <div className="text-sm text-gray-500">{project.Customer} • {project.Stage}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td colSpan={dateColumns.length} className="p-4">
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm text-gray-500">{projectTasks.length} tasks</span>
+                            {projectTasks.length === 0 && (
+                              <button
+                                onClick={() => createTasksFromTemplate(project)}
+                                className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                              >
+                                <Plus className="w-3 h-3" /> Create {project.Stage} tasks
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Task Rows */}
+                      {isExpanded && projectTasks.map((task) => (
+                        <tr key={task.id} className="border-b bg-gray-50/50 hover:bg-gray-100">
+                          <td className="p-4 pl-12">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${statusColors[task.Status] || 'bg-gray-300'}`} />
+                              <span className="text-sm">{task['Task Name']}</span>
+                            </div>
+                          </td>
+                          {dateColumns.map((col, i) => {
+                            const taskStart = task['Start Date'] ? new Date(task['Start Date']) : null;
+                            const taskEnd = task['Due Date'] ? new Date(task['Due Date']) : null;
+                            const colStart = col.date;
+                            const colEnd = new Date(colStart);
+                            colEnd.setDate(colEnd.getDate() + 7);
+
+                            const isInRange = taskStart && taskEnd &&
+                              taskStart <= colEnd && taskEnd >= colStart;
+
+                            return (
+                              <td key={i} className="p-1">
+                                {isInRange && (
+                                  <div
+                                    className={`h-6 rounded ${statusColors[task.Status] || 'bg-gray-300'} opacity-80`}
+                                    style={{ width: '100%' }}
+                                  />
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === 'list' && (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b bg-gray-50">
+                <th className="text-left p-4 font-medium text-gray-600">Task</th>
+                <th className="text-left p-4 font-medium text-gray-600">Project</th>
+                <th className="text-left p-4 font-medium text-gray-600">Phase</th>
+                <th className="text-left p-4 font-medium text-gray-600">Status</th>
+                <th className="text-left p-4 font-medium text-gray-600">Due Date</th>
+                <th className="text-left p-4 font-medium text-gray-600">Progress</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredProjects.flatMap(project =>
+                getProjectTasks(project.id).map(task => (
+                  <tr key={task.id} className="border-b hover:bg-gray-50">
+                    <td className="p-4">
+                      <div className="font-medium">{task['Task Name']}</div>
+                      <div className="text-sm text-gray-500">{task.Category}</div>
+                    </td>
+                    <td className="p-4">{project['Project ID']}</td>
+                    <td className="p-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        task.Phase === 'Concept' ? 'bg-purple-100 text-purple-800' :
+                        task.Phase === 'D&E' ? 'bg-blue-100 text-blue-800' :
+                        'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {task.Phase}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        task.Status === 'Complete' ? 'bg-green-100 text-green-800' :
+                        task.Status === 'In Progress' ? 'bg-blue-100 text-blue-800' :
+                        task.Status === 'Blocked' ? 'bg-red-100 text-red-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {task.Status}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm">
+                      {task['Due Date'] ? new Date(task['Due Date']).toLocaleDateString() : '-'}
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-600 rounded-full"
+                            style={{ width: `${(task['Percent Complete'] || 0) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-sm text-gray-500">
+                          {Math.round((task['Percent Complete'] || 0) * 100)}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+              {filteredProjects.flatMap(p => getProjectTasks(p.id)).length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-gray-500">
+                    No tasks found. Click "Create tasks" on a project to get started.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PipelineAnalyticsView({ projects }) {
   const [stageFilter, setStageFilter] = useState('pipeline'); // pipeline, all, production
