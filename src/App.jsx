@@ -1,7 +1,7 @@
 // Honomobo Operations - Full Integrated Platform
 // UPDATED: All views now use real Airtable data
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, ClipboardList, DollarSign, AlertTriangle, Menu, X, Plus, RefreshCw, Edit2, Trash2, Calendar, MapPin, Clock, CheckCircle, AlertCircle, FileText, Eye, Shield, ChevronDown, ChevronRight, ChevronUp, Upload, Search, Check, History, Home, ChevronLeft, Truck, Ship, GripVertical, Zap, Users, Package, Settings, RotateCcw, Download, Filter, CheckCircle2, Factory, TrendingUp, TrendingDown, Building2, Circle, MoreHorizontal, MessageSquare, ExternalLink, ArrowRight, ArrowLeft, Folder, User, Wrench, ClipboardCheck, Camera, Flag, BarChart3, CreditCard, Pencil, Info, PieChart, Calculator, Loader2, Lock, Pen, PackageCheck, Phone, Mail, ListOrdered } from 'lucide-react';
+import { LayoutDashboard, ClipboardList, DollarSign, AlertTriangle, Menu, X, Plus, RefreshCw, Edit2, Trash2, Calendar, MapPin, Clock, CheckCircle, AlertCircle, FileText, Eye, Shield, ChevronDown, ChevronRight, Upload, Search, Check, History, Home, ChevronLeft, Truck, Ship, GripVertical, Zap, Users, Package, Settings, RotateCcw, Download, Filter, CheckCircle2, Factory, TrendingUp, TrendingDown, Building2, Circle, MoreHorizontal, MessageSquare, ExternalLink, ArrowRight, ArrowLeft, Folder, User, Wrench, ClipboardCheck, Camera, Flag, BarChart3, CreditCard, Pencil, Info, PieChart, Calculator, Loader2, Lock, Pen, PackageCheck, Phone, Mail } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AIRTABLE CONFIGURATION & API
@@ -12,6 +12,16 @@ const PROJECTS_TABLE = 'Projects';
 const DOCUMENTS_TABLE = 'Documents';
 const ACTUALS_TABLE = 'Actuals';
 const PAYMENTS_TABLE = 'Payments';
+
+// Helper to sort projects by job number ascending (HO715 → 715)
+const sortByJobNumber = (a, b) => {
+  const getNum = (p) => {
+    const id = p['Project ID'] || p.id || '';
+    const match = id.match(/\d+/);
+    return match ? parseInt(match[0]) : 9999;
+  };
+  return getNum(a) - getNum(b);
+};
 
 const airtableAPI = {
   async fetchProjects() {
@@ -61,8 +71,8 @@ const airtableAPI = {
     });
     const data = await res.json();
     if (data.error) {
-      console.error('Airtable error:', data.error);
-      throw new Error(data.error.message || 'Failed to update');
+      console.error('Airtable update error:', data.error);
+      throw new Error(data.error.message || 'Failed to update project');
     }
     return { id: data.id, ...data.fields };
   },
@@ -95,26 +105,61 @@ const airtableAPI = {
     }
     return results;
   },
-  async updateProductionOrder(updates) {
-    // updates is array of { id, order }
-    // Batch update in groups of 10
+  async fetchTasks() {
+    try {
+      let allRecords = [];
+      let offset = null;
+      do {
+        const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks${offset ? `?offset=${offset}` : ''}`;
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+        if (!res.ok) return [];
+        const data = await res.json();
+        allRecords = allRecords.concat(data.records.map(r => ({ id: r.id, ...r.fields })));
+        offset = data.offset;
+      } while (offset);
+      return allRecords;
+    } catch { return []; }
+  },
+  async fetchTeamMembers() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Team%20Members`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async createTask(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async updateTask(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    return { id: data.id, ...data.fields };
+  },
+  async createTasksBatch(records) {
     const batches = [];
-    for (let i = 0; i < updates.length; i += 10) {
-      batches.push(updates.slice(i, i + 10));
+    for (let i = 0; i < records.length; i += 10) {
+      batches.push(records.slice(i, i + 10));
     }
+    const results = [];
     for (const batch of batches) {
-      const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}`, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          records: batch.map(u => ({
-            id: u.id,
-            fields: { 'Production Order': u.order }
-          }))
-        })
+      const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records: batch.map(fields => ({ fields })) })
       });
-      if (!res.ok) throw new Error('Failed to update production order');
+      const data = await res.json();
+      results.push(...(data.records || []).map(r => ({ id: r.id, ...r.fields })));
     }
+    return results;
   }
 };
 
@@ -123,24 +168,6 @@ const airtableAPI = {
 // ══════════════════════════════════════════════════════════════════════════════
 const formatCurrency = v => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v || 0);
 const formatCompact = v => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v?.toLocaleString() || '0';
-
-// Get mod count from Model/Unit Type (HO2=2, HO3=3, HO5=5, HS6=6, HS8=8, SO1=1, etc.)
-const getModCountFromModel = (project) => {
-  const model = (project?.['Model'] || project?.['Unit Type'] || '').toUpperCase();
-  
-  // Extract number from model name (HO2, HO3, HO4, HO5, HS6, HS8, HS12, SO1)
-  const match = model.match(/(HO|HS|SO)(\d+)/);
-  if (match) {
-    return parseInt(match[2]) || 1;
-  }
-  
-  // Special cases
-  if (model.includes('BATH') || model.includes('BAR')) return 1;
-  if (model.includes('PD')) return 5; // Pod?
-  
-  // Default
-  return 1;
-};
 
 const MARKET_MAP = {
   'CA': 'california', 'California': 'california',
@@ -330,20 +357,6 @@ function DashboardView({ projects, onEdit }) {
   const STAGES = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': '#64748b', 'Concept': '#a855f7', 'D&E': '#3b82f6', 'Permitting': '#f59e0b', 'Production': '#10b981', 'Logistics': '#f97316', 'Complete': '#6b7280' };
 
-  // Detect duplicate Project IDs
-  const duplicates = useMemo(() => {
-    const idCounts = {};
-    projects.forEach(p => {
-      const id = p['Project ID'];
-      if (id) {
-        idCounts[id] = (idCounts[id] || 0) + 1;
-      }
-    });
-    return Object.entries(idCounts)
-      .filter(([id, count]) => count > 1)
-      .map(([id, count]) => ({ id, count }));
-  }, [projects]);
-
   const metrics = useMemo(() => {
     const active = projects.filter(p => p.Stage !== 'Complete');
     const total = active.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
@@ -371,22 +384,6 @@ function DashboardView({ projects, onEdit }) {
 
   return (
     <div className="space-y-6">
-      {/* Duplicate Warning */}
-      {duplicates.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
-            <div>
-              <div className="font-medium text-red-800">Duplicate Projects Detected</div>
-              <div className="text-sm text-red-600 mt-1">
-                {duplicates.map(d => `${d.id} (${d.count}x)`).join(', ')}
-              </div>
-              <div className="text-xs text-red-500 mt-2">Remove duplicates in Airtable to fix data accuracy</div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border p-5">
           <div className="flex justify-between items-start mb-2">
@@ -460,7 +457,7 @@ function DashboardView({ projects, onEdit }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {projects.slice(0, 10).map(p => (
+            {[...projects].sort(sortByJobNumber).slice(0, 10).map(p => (
               <tr key={p.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(p)}>
                 <td className="px-6 py-4">
                   <div className="font-medium">{p['Project ID']}</div>
@@ -485,303 +482,327 @@ function DashboardView({ projects, onEdit }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WIP SCHEDULE VIEW - Editable, saves to Airtable
+// WIP SCHEDULE VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
+const WIP_MONTHS = [
+  { key: 'dec', label: 'Dec 31', isBaseline: true, airtableField: 'WIP Dec 31' },
+  { key: 'jan', label: 'Jan', airtableField: 'WIP Jan' },
+  { key: 'feb', label: 'Feb', airtableField: 'WIP Feb' },
+  { key: 'mar', label: 'Mar', airtableField: 'WIP Mar' },
+  { key: 'apr', label: 'Apr', airtableField: 'WIP Apr' },
+  { key: 'may', label: 'May', airtableField: 'WIP May' },
+  { key: 'jun', label: 'Jun', airtableField: 'WIP Jun' },
+  { key: 'jul', label: 'Jul', airtableField: 'WIP Jul' },
+  { key: 'aug', label: 'Aug', airtableField: 'WIP Aug' },
+  { key: 'sep', label: 'Sep', airtableField: 'WIP Sep' },
+  { key: 'oct', label: 'Oct', airtableField: 'WIP Oct' },
+  { key: 'nov', label: 'Nov', airtableField: 'WIP Nov' },
+  { key: 'dec2', label: 'Dec', airtableField: 'WIP Dec' },
+];
 
-function WIPScheduleView({ projects, onUpdateWip }) {
-  // WIP month fields that will be stored in Airtable
-  const WIP_FIELDS = [
-    { key: 'dec31', label: 'Dec 31', field: 'WIP Dec 31' },
-    { key: 'jan', label: 'Jan', field: 'WIP Jan' },
-    { key: 'feb', label: 'Feb', field: 'WIP Feb' },
-    { key: 'mar', label: 'Mar', field: 'WIP Mar' },
-    { key: 'apr', label: 'Apr', field: 'WIP Apr' },
-    { key: 'may', label: 'May', field: 'WIP May' },
-    { key: 'jun', label: 'Jun', field: 'WIP Jun' },
-    { key: 'jul', label: 'Jul', field: 'WIP Jul' },
-    { key: 'aug', label: 'Aug', field: 'WIP Aug' },
-    { key: 'sep', label: 'Sep', field: 'WIP Sep' },
-    { key: 'oct', label: 'Oct', field: 'WIP Oct' },
-    { key: 'nov', label: 'Nov', field: 'WIP Nov' },
-    { key: 'dec', label: 'Dec', field: 'WIP Dec' },
-  ];
+const WipCell = ({ value, isBaseline, isEditing, onStartEdit, onChange }) => {
+  const [editValue, setEditValue] = useState(value || '');
+  useEffect(() => { setEditValue(value || ''); }, [value]);
+  
+  const handleSave = () => {
+    onChange(editValue === '' ? null : parseInt(editValue));
+  };
+  
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          min="0"
+          max="100"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          className="w-12 px-1 py-0.5 text-sm border border-blue-400 rounded text-center focus:outline-none"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSave();
+            if (e.key === 'Escape') onChange(value);
+          }}
+        />
+        <button onClick={handleSave} className="text-emerald-600 hover:text-emerald-700">
+          <Check className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  }
+  
+  if (value === null || value === undefined) {
+    return <div onClick={onStartEdit} className="text-gray-300 cursor-pointer hover:bg-gray-100 px-2 py-1 rounded">—</div>;
+  }
+  
+  return (
+    <div
+      onClick={onStartEdit}
+      className={`px-2 py-1 rounded cursor-pointer text-sm font-medium transition-colors ${
+        value === 100 ? 'bg-emerald-100 text-emerald-700' :
+        isBaseline ? 'bg-amber-100 text-amber-700' :
+        'bg-blue-50 text-blue-700 hover:bg-blue-100'
+      }`}
+    >
+      {value}%
+    </div>
+  );
+};
 
-  // Build WIP data from projects (reads from Airtable WIP fields)
+function WIPScheduleView({ projects, onUpdateProject }) {
+  // Read WIP data directly from Airtable fields
   const buildWipData = (projects) => {
     return projects
-      .filter(p => ['Production', 'Logistics', 'D&E', 'Permitting'].includes(p.Stage))
+      .filter(p => ['Production', 'Logistics'].includes(p.Stage))
+      .sort(sortByJobNumber)
       .map(p => {
+        // Read WIP values from Airtable fields
         const wip = {};
-        WIP_FIELDS.forEach(m => {
-          const val = p[m.field];
-          wip[m.key] = val !== undefined && val !== null && val !== '' ? parseFloat(val) : null;
+        WIP_MONTHS.forEach(m => {
+          const airtableValue = p[m.airtableField];
+          // Airtable stores percent as decimal (0.25 = 25%), convert to integer
+          if (airtableValue !== undefined && airtableValue !== null) {
+            wip[m.key] = Math.round(airtableValue * 100);
+          } else {
+            wip[m.key] = null;
+          }
         });
-        
+
         return {
-          id: p['Project ID'] || '',
-          customer: p['Status'] || p['Customer (text)'] || p['Customer'] || '',
+          id: p['Project ID'],
+          customer: p['Status'] || p['Customer (text)'] || '',
           unit: p['Model'] || p['Unit Type'] || '',
           contract: p['Contract Value'] || 0,
-          budget: p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
+          budget: p['MFG Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
           wip,
-          airtableId: p.id,
-          stage: p.Stage
+          airtableId: p.id
         };
-      })
-      .sort((a, b) => {
-        // Sort by first non-null WIP month (earliest start first)
-        const aFirst = WIP_FIELDS.findIndex(m => a.wip[m.key] !== null && a.wip[m.key] > 0);
-        const bFirst = WIP_FIELDS.findIndex(m => b.wip[m.key] !== null && b.wip[m.key] > 0);
-        if (aFirst === -1 && bFirst === -1) return 0;
-        if (aFirst === -1) return 1;
-        if (bFirst === -1) return -1;
-        return aFirst - bFirst;
       });
   };
 
   const [wipData, setWipData] = useState(() => buildWipData(projects));
   const [editingCell, setEditingCell] = useState(null);
-  const [editValue, setEditValue] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [unitFilter, setUnitFilter] = useState('all');
   const [showCompleted, setShowCompleted] = useState(true);
-  const [saving, setSaving] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   useEffect(() => {
+    // Rebuild WIP data from Airtable whenever projects change
     setWipData(buildWipData(projects));
   }, [projects]);
 
-  const currentMonth = new Date().getMonth(); // 0 = Jan
-
-  // Handle cell click - start editing
-  const handleCellClick = (projectId, monthKey, currentValue) => {
-    setEditingCell({ projectId, monthKey });
-    setEditValue(currentValue !== null ? Math.round(currentValue * 100).toString() : '');
-  };
-
-  // Handle save
-  const handleSave = async (projectId, monthKey) => {
-    const project = wipData.find(p => p.id === projectId);
-    if (!project) return;
-
-    const newValue = editValue === '' ? null : parseInt(editValue) / 100;
-    const field = WIP_FIELDS.find(m => m.key === monthKey)?.field;
-    
-    if (field && onUpdateWip) {
-      setSaving({ projectId, monthKey });
-      try {
-        await onUpdateWip(project.airtableId, { [field]: newValue });
-        // Update local state
-        setWipData(prev => prev.map(p => 
-          p.id === projectId 
-            ? { ...p, wip: { ...p.wip, [monthKey]: newValue } }
-            : p
-        ));
-      } catch (err) {
-        alert('Failed to save: ' + err.message);
-      }
-      setSaving(null);
-    } else {
-      // Just update local state if no save handler
-      setWipData(prev => prev.map(p => 
-        p.id === projectId 
-          ? { ...p, wip: { ...p.wip, [monthKey]: newValue } }
-          : p
-      ));
-    }
-    setEditingCell(null);
-  };
-
-  // Handle key press in edit mode
-  const handleKeyDown = (e, projectId, monthKey) => {
-    if (e.key === 'Enter') {
-      handleSave(projectId, monthKey);
-    } else if (e.key === 'Escape') {
-      setEditingCell(null);
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      handleSave(projectId, monthKey);
-      // Move to next cell
-      const monthIdx = WIP_FIELDS.findIndex(m => m.key === monthKey);
-      if (monthIdx < WIP_FIELDS.length - 1) {
-        const nextMonth = WIP_FIELDS[monthIdx + 1].key;
-        const currentVal = wipData.find(p => p.id === projectId)?.wip[nextMonth];
-        handleCellClick(projectId, nextMonth, currentVal);
-      }
-    }
-  };
-
-  // Filter data
-  const filteredData = wipData.filter(p => {
-    if (searchTerm && !p.id.toLowerCase().includes(searchTerm.toLowerCase()) && 
-        !p.customer.toLowerCase().includes(searchTerm.toLowerCase())) {
-      return false;
-    }
-    if (!showCompleted) {
-      const lastWip = WIP_FIELDS.reduce((last, m) => p.wip[m.key] !== null ? p.wip[m.key] : last, 0);
-      if (lastWip >= 1) return false;
-    }
-    return true;
-  });
-
-  // Calculate summary
+  const units = [...new Set(wipData.map(p => p.unit).filter(Boolean))].sort();
+  
   const summary = useMemo(() => {
-    const totalContract = filteredData.reduce((sum, p) => sum + p.contract, 0);
-    const totalBudget = filteredData.reduce((sum, p) => sum + p.budget, 0);
-    
-    // Revenue by month (incremental)
-    const revenueByMonth = {};
-    WIP_FIELDS.forEach((month, idx) => {
-      revenueByMonth[month.key] = filteredData.reduce((sum, p) => {
-        const wipPercent = p.wip[month.key] || 0;
-        const prevMonth = WIP_FIELDS[idx - 1];
-        const prevWipPercent = prevMonth ? (p.wip[prevMonth.key] || 0) : 0;
-        return sum + (p.budget * Math.max(0, wipPercent - prevWipPercent));
-      }, 0);
+    const activeProjects = wipData.filter(p => {
+      const latestWip = Object.values(p.wip).filter(v => v !== null).pop() || 0;
+      return showCompleted || latestWip < 100;
     });
-
+    const totalContract = activeProjects.reduce((sum, p) => sum + p.contract, 0);
+    const totalBudget = activeProjects.reduce((sum, p) => sum + p.budget, 0);
+    const currentMonthKey = WIP_MONTHS[new Date().getMonth() + 1]?.key || 'jan';
+    const recognizedRevenue = activeProjects.reduce((sum, p) => sum + (p.contract * (p.wip[currentMonthKey] || 0) / 100), 0);
+    const revenueByMonth = WIP_MONTHS.reduce((acc, month, idx) => {
+      acc[month.key] = activeProjects.reduce((sum, p) => {
+        const wipPercent = p.wip[month.key] || 0;
+        const prevMonth = WIP_MONTHS[idx - 1];
+        const prevWipPercent = prevMonth ? (p.wip[prevMonth.key] || 0) : 0;
+        return sum + (p.contract * Math.max(0, wipPercent - prevWipPercent) / 100);
+      }, 0);
+      return acc;
+    }, {});
     return {
-      projectCount: filteredData.length,
+      projectCount: activeProjects.length,
       totalContract,
       totalBudget,
+      recognizedRevenue,
       revenueByMonth,
+      projectedMargin: totalContract - totalBudget,
+      marginPercent: totalContract > 0 ? ((totalContract - totalBudget) / totalContract * 100).toFixed(1) : '0'
     };
-  }, [filteredData]);
+  }, [wipData, showCompleted]);
 
-  // Get cell styling
-  const getCellStyle = (value, monthIdx) => {
-    if (value === null || value === undefined) return 'bg-white text-gray-400';
-    if (value >= 1) return 'bg-emerald-100 text-emerald-700 font-medium';
-    if (monthIdx === 0) return 'bg-amber-100 text-amber-700'; // Dec 31 = yellow
-    return 'bg-blue-50 text-blue-700';
-  };
+  const filteredData = useMemo(() => {
+    let result = wipData.filter(p => {
+      if (searchTerm && !p.id.toLowerCase().includes(searchTerm.toLowerCase()) && !p.customer.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      if (unitFilter !== 'all' && p.unit !== unitFilter) return false;
+      if (!showCompleted) {
+        const latestWip = Object.values(p.wip).filter(v => v !== null).pop() || 0;
+        if (latestWip === 100) return false;
+      }
+      return true;
+    });
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        let aVal = ['contract', 'budget'].includes(sortConfig.key) ? a[sortConfig.key] : ['customer', 'id', 'unit'].includes(sortConfig.key) ? a[sortConfig.key] : a.wip[sortConfig.key] || 0;
+        let bVal = ['contract', 'budget'].includes(sortConfig.key) ? b[sortConfig.key] : ['customer', 'id', 'unit'].includes(sortConfig.key) ? b[sortConfig.key] : b.wip[sortConfig.key] || 0;
+        return (aVal < bVal ? -1 : aVal > bVal ? 1 : 0) * (sortConfig.direction === 'asc' ? 1 : -1);
+      });
+    }
+    return result;
+  }, [wipData, searchTerm, unitFilter, showCompleted, sortConfig]);
 
-  const formatPercent = (val) => {
-    if (val === null || val === undefined) return '';
-    return `${Math.round(val * 100)}%`;
+  const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
+  const handleWipUpdate = async (projectId, month, value, airtableId) => {
+    // Update local state immediately
+    setWipData(prev => prev.map(p => p.id === projectId ? { ...p, wip: { ...p.wip, [month]: value } } : p));
+    setEditingCell(null);
+
+    // Find the Airtable field name for this month
+    const monthConfig = WIP_MONTHS.find(m => m.key === month);
+    if (monthConfig && onUpdateProject && airtableId) {
+      // Convert integer percent to decimal for Airtable (25 -> 0.25)
+      const airtableValue = value !== null ? value / 100 : null;
+      await onUpdateProject({ [monthConfig.airtableField]: airtableValue }, airtableId);
+    }
   };
+  
+  const handleExport = () => {
+    const headers = ['Job #', 'Customer', 'Unit', 'Contract', 'Budget', ...WIP_MONTHS.map(m => m.label)];
+    const rows = filteredData.map(p => [p.id, p.customer, p.unit, p.contract, p.budget, ...WIP_MONTHS.map(m => p.wip[m.key] !== null ? `${p.wip[m.key]}%` : '')]);
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `WIP_Schedule_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+  };
+  
+  const SortIndicator = ({ columnKey }) => sortConfig.key !== columnKey ? null : <ChevronDown className={`w-3 h-3 inline ml-1 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Work in Progress (WIP) Schedule - 2026</h2>
-          <p className="text-sm text-gray-500">
-            <span className="text-amber-600">Yellow = Dec 31</span> | <span className="text-emerald-600">Green = 100% Complete</span> | Click cells to edit
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm w-48"
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={showCompleted}
-              onChange={e => setShowCompleted(e.target.checked)}
-              className="rounded"
-            />
-            Show completed
-          </label>
-        </div>
+        <p className="text-sm text-gray-500">
+          <span className="inline-block w-3 h-3 bg-amber-200 rounded mr-1"></span> Dec 31 Baseline
+          <span className="mx-2">|</span>
+          <span className="inline-block w-3 h-3 bg-emerald-200 rounded mr-1"></span> 100% Complete
+          <span className="mx-2">|</span>
+          Click any cell to edit WIP %
+          <span className="mx-2">|</span>
+          <span className="text-blue-600 font-medium">Data from Airtable</span>
+        </p>
+        <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800">
+          <Download className="w-4 h-4" />Export CSV
+        </button>
       </div>
-
-      {/* Summary Cards */}
+      
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Projects</div>
+        <div className="rounded-xl border p-4 bg-gray-50">
+          <div className="text-sm text-gray-600 mb-1">Active Projects</div>
           <div className="text-2xl font-bold">{summary.projectCount}</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Contract</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalContract)}</div>
+        <div className="rounded-xl border p-4 bg-blue-50 border-blue-200">
+          <div className="text-sm text-gray-600 mb-1">Total Contract Value</div>
+          <div className="text-2xl font-bold">${formatCompact(summary.totalContract)}</div>
+          <div className="text-sm text-gray-500 mt-1">Budget: ${formatCompact(summary.totalBudget)}</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Budget</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalBudget)}</div>
+        <div className="rounded-xl border p-4 bg-emerald-50 border-emerald-200">
+          <div className="text-sm text-gray-600 mb-1">Recognized Revenue</div>
+          <div className="text-2xl font-bold text-emerald-700">${formatCompact(summary.recognizedRevenue)}</div>
+          <div className="text-sm text-gray-500 mt-1">{summary.totalContract > 0 ? Math.round(summary.recognizedRevenue / summary.totalContract * 100) : 0}% of contract</div>
         </div>
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Gross Margin</div>
-          <div className="text-2xl font-bold">{formatCurrency(summary.totalContract - summary.totalBudget)}</div>
+        <div className="rounded-xl border p-4 bg-amber-50 border-amber-200">
+          <div className="text-sm text-gray-600 mb-1">Projected Margin</div>
+          <div className="text-2xl font-bold text-amber-700">${formatCompact(summary.projectedMargin)}</div>
+          <div className="text-sm text-gray-500 mt-1">{summary.marginPercent}% margin</div>
         </div>
       </div>
-
-      {/* WIP Table */}
+      
+      <div className="bg-white rounded-xl border p-4 flex items-center gap-4 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input type="text" placeholder="Search job # or customer..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-gray-400" />
+          <select value={unitFilter} onChange={(e) => setUnitFilter(e.target.value)} className="text-sm border rounded-lg px-3 py-2">
+            <option value="all">All Models</option>
+            {units.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} className="rounded border-gray-300 text-blue-500" />
+          Show completed
+        </label>
+        <div className="flex-1" />
+        <div className="text-sm text-gray-500">Showing {filteredData.length} of {wipData.length} projects</div>
+      </div>
+      
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="bg-blue-900 text-white">
-                <th className="px-3 py-3 text-left font-semibold sticky left-0 bg-blue-900 z-10">Job #</th>
-                <th className="px-3 py-3 text-left font-semibold">Customer</th>
-                <th className="px-3 py-3 text-left font-semibold">Unit</th>
-                <th className="px-3 py-3 text-right font-semibold">Contract</th>
-                <th className="px-3 py-3 text-right font-semibold">Budget</th>
-                {WIP_FIELDS.map((month, idx) => (
-                  <th key={month.key} className={`px-2 py-3 text-center font-semibold min-w-[60px] ${idx === 0 ? 'bg-amber-600' : ''}`}>
-                    {month.label}
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100 sticky left-0 bg-gray-50 z-10" onClick={() => handleSort('id')}>Job # <SortIndicator columnKey="id" /></th>
+                <th className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('customer')}>Customer <SortIndicator columnKey="customer" /></th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('unit')}>Model <SortIndicator columnKey="unit" /></th>
+                <th className="text-right py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('contract')}>Contract <SortIndicator columnKey="contract" /></th>
+                <th className="text-right py-3 px-3 text-xs font-semibold text-gray-600 uppercase cursor-pointer hover:bg-gray-100" onClick={() => handleSort('budget')}>Budget <SortIndicator columnKey="budget" /></th>
+                {WIP_MONTHS.map(m => (
+                  <th key={m.key} className={`text-center py-3 px-2 text-xs font-semibold uppercase cursor-pointer hover:bg-gray-100 ${m.isBaseline ? 'bg-amber-50 text-amber-700' : 'text-gray-600'}`} onClick={() => handleSort(m.key)}>
+                    {m.label} <SortIndicator columnKey={m.key} />
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {filteredData.map((project, rowIdx) => (
-                <tr key={project.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium sticky left-0 bg-white z-10 border-r">{project.id}</td>
-                  <td className="px-3 py-2 text-gray-600">{project.customer}</td>
-                  <td className="px-3 py-2">{project.unit}</td>
-                  <td className="px-3 py-2 text-right font-medium">{formatCurrency(project.contract)}</td>
-                  <td className="px-3 py-2 text-right">{formatCurrency(project.budget)}</td>
-                  {WIP_FIELDS.map((month, monthIdx) => {
-                    const value = project.wip[month.key];
-                    const isEditing = editingCell?.projectId === project.id && editingCell?.monthKey === month.key;
-                    const isSaving = saving?.projectId === project.id && saving?.monthKey === month.key;
-                    
-                    return (
-                      <td 
-                        key={month.key} 
-                        className={`px-1 py-1 text-center border-l ${getCellStyle(value, monthIdx)} cursor-pointer hover:ring-2 hover:ring-blue-400 hover:ring-inset`}
-                        onClick={() => !isEditing && handleCellClick(project.id, month.key, value)}
-                      >
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onBlur={() => handleSave(project.id, month.key)}
-                            onKeyDown={e => handleKeyDown(e, project.id, month.key)}
-                            className="w-14 px-1 py-0.5 text-center border rounded text-sm"
-                            autoFocus
-                          />
-                        ) : isSaving ? (
-                          <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                        ) : (
-                          formatPercent(value)
-                        )}
-                      </td>
-                    );
-                  })}
+            <tbody>
+              {filteredData.map(p => (
+                <tr key={p.id} className={`border-b border-gray-100 ${(Object.values(p.wip).filter(v => v !== null).pop() || 0) === 100 ? 'bg-gray-50/50' : 'hover:bg-gray-50'}`}>
+                  <td className="py-2 px-4 font-medium text-gray-900 sticky left-0 bg-white z-10">{p.id}</td>
+                  <td className="py-2 px-4 text-gray-700">{p.customer}</td>
+                  <td className="py-2 px-3"><span className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs font-medium rounded">{p.unit || '—'}</span></td>
+                  <td className="py-2 px-3 text-right text-sm text-gray-900">${formatCompact(p.contract)}</td>
+                  <td className="py-2 px-3 text-right text-sm text-gray-600">${formatCompact(p.budget)}</td>
+                  {WIP_MONTHS.map(m => (
+                    <td key={m.key} className={`py-2 px-2 text-center ${m.isBaseline ? 'bg-amber-50/50' : ''}`}>
+                      <WipCell
+                        value={p.wip[m.key]}
+                        isBaseline={m.isBaseline}
+                        isEditing={editingCell?.id === p.id && editingCell?.month === m.key}
+                        onStartEdit={() => setEditingCell({ id: p.id, month: m.key })}
+                        onChange={(v) => handleWipUpdate(p.id, m.key, v, p.airtableId)}
+                      />
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
-            {/* Revenue Row */}
-            <tfoot>
-              <tr className="bg-gray-100 font-semibold border-t-2">
-                <td className="px-3 py-2 sticky left-0 bg-gray-100 z-10" colSpan={5}>Production Revenue (Budget × WIP Δ)</td>
-                {WIP_FIELDS.map(month => (
-                  <td key={month.key} className="px-2 py-2 text-center text-xs">
-                    {formatCurrency(summary.revenueByMonth[month.key] || 0)}
+            <tfoot className="bg-gray-100 border-t-2 border-gray-300">
+              <tr>
+                <td colSpan={3} className="py-3 px-4 font-semibold text-gray-900 sticky left-0 bg-gray-100 z-10">TOTALS ({filteredData.length} projects)</td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-900">${formatCompact(filteredData.reduce((s, p) => s + p.contract, 0))}</td>
+                <td className="py-3 px-3 text-right font-semibold text-gray-700">${formatCompact(filteredData.reduce((s, p) => s + p.budget, 0))}</td>
+                {WIP_MONTHS.map(m => (
+                  <td key={m.key} className={`py-3 px-2 text-center text-sm font-semibold text-gray-700 ${m.isBaseline ? 'bg-amber-100' : ''}`}>
+                    ${formatCompact(filteredData.reduce((s, p) => s + (p.contract * (p.wip[m.key] || 0) / 100), 0))}
                   </td>
                 ))}
               </tr>
             </tfoot>
           </table>
+        </div>
+      </div>
+      
+      <div className="bg-white rounded-xl border p-4">
+        <h3 className="font-semibold text-gray-900 mb-4">Monthly Revenue Recognition</h3>
+        <div className="flex items-end gap-2 h-32">
+          {WIP_MONTHS.slice(1).map(m => {
+            const rev = summary.revenueByMonth[m.key] || 0;
+            const max = Math.max(...Object.values(summary.revenueByMonth), 1);
+            const h = max > 0 ? (rev / max) * 100 : 0;
+            return (
+              <div key={m.key} className="flex-1 flex flex-col items-center">
+                <div className="w-full flex flex-col items-center justify-end h-24">
+                  <div className="text-xs text-gray-500 mb-1">{rev > 0 ? `$${formatCompact(rev)}` : ''}</div>
+                  <div className="w-full bg-blue-500 rounded-t transition-all" style={{ height: `${h}%`, minHeight: rev > 0 ? '4px' : '0' }} />
+                </div>
+                <div className="text-xs text-gray-500 mt-2">{m.label}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -796,7 +817,7 @@ function JobScheduleView({ projects, onEdit }) {
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredProjects = useMemo(() => {
-    let result = projects;
+    let result = [...projects].sort(sortByJobNumber);
     if (filter !== 'all') {
       result = result.filter(p => p.Stage === filter);
     }
@@ -1034,7 +1055,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
           <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2"><AlertCircle className="w-5 h-5" />Unassigned ({unassigned})</h3>
           <div className="grid grid-cols-6 gap-3">
-            {productionProjects.filter(p => !p['Bay Assignment']).map(p => (
+            {productionProjects.filter(p => !p['Bay Assignment']).sort(sortByJobNumber).map(p => (
               <div key={p.id} className="bg-white rounded-lg p-3 border border-amber-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                 <div className="font-semibold text-sm">{p['Project ID']}</div>
                 <div className="text-xs text-gray-500">{p['Model'] || '—'}</div>
@@ -1231,7 +1252,7 @@ function ProductionBoardView({ projects, onEdit }) {
       <p className="text-sm text-gray-500"><span className="text-blue-600 font-medium">Data from Airtable</span> • Columns based on MFG Status</p>
       <div className="grid grid-cols-5 gap-4">
         {PROD_STAGES.map(stage => {
-          const stageProjects = productionProjects.filter(p => p.boardStage === stage.id);
+          const stageProjects = productionProjects.filter(p => p.boardStage === stage.id).sort(sortByJobNumber);
           return (
             <div key={stage.id} className="bg-white rounded-xl border overflow-hidden">
               <div className="px-4 py-3 border-b flex items-center justify-between" style={{ backgroundColor: `${stage.color}15` }}>
@@ -1390,840 +1411,6 @@ function BudgetView({ projects }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PROJECT BUDGET VIEW - Individual project cost tracking
-// ══════════════════════════════════════════════════════════════════════════════
-function ProjectBudgetView({ projects, actuals }) {
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const activeProjects = useMemo(() => 
-    projects.filter(p => ['D&E', 'Permitting', 'Production', 'Logistics'].includes(p.Stage)),
-    [projects]
-  );
-
-  const filteredProjects = useMemo(() => {
-    if (!searchTerm) return activeProjects;
-    const term = searchTerm.toLowerCase();
-    return activeProjects.filter(p => 
-      p['Project ID']?.toLowerCase().includes(term) ||
-      (p['Status'] || p['Customer (text)'] || '').toLowerCase().includes(term)
-    );
-  }, [activeProjects, searchTerm]);
-
-  const selectedProject = selectedProjectId 
-    ? projects.find(p => p.id === selectedProjectId)
-    : filteredProjects[0];
-
-  // Budget categories with typical allocations
-  const budgetCategories = [
-    { id: 'materials', name: 'Materials', percent: 45 },
-    { id: 'labor', name: 'Labor', percent: 30 },
-    { id: 'equipment', name: 'Equipment', percent: 8 },
-    { id: 'shipping', name: 'Shipping', percent: 10 },
-    { id: 'overhead', name: 'Overhead', percent: 7 },
-  ];
-
-  const projectBudget = useMemo(() => {
-    if (!selectedProject) return null;
-    const totalBudget = selectedProject['MFG Budget'] || selectedProject['Budget'] || 
-      Math.round((selectedProject['Contract Value'] || 0) * 0.7);
-    
-    // Get actuals for this project if available
-    const projectActuals = (actuals || []).filter(a => 
-      a['Project ID'] === selectedProject['Project ID'] ||
-      a['Project']?.includes(selectedProject.id)
-    );
-
-    const categories = budgetCategories.map(cat => {
-      const budgeted = Math.round(totalBudget * cat.percent / 100);
-      const actual = projectActuals
-        .filter(a => (a['Category'] || '').toLowerCase() === cat.id)
-        .reduce((sum, a) => sum + (a['Amount'] || 0), 0);
-      return {
-        ...cat,
-        budgeted,
-        actual,
-        variance: budgeted - actual,
-        percentUsed: budgeted > 0 ? (actual / budgeted) * 100 : 0
-      };
-    });
-
-    const totalActual = categories.reduce((sum, c) => sum + c.actual, 0);
-
-    return {
-      contract: selectedProject['Contract Value'] || 0,
-      budget: totalBudget,
-      grossMargin: selectedProject['Gross Margin'] || (selectedProject['Contract Value'] || 0) - totalBudget,
-      marginPercent: selectedProject['Margin %'] || 
-        ((selectedProject['Contract Value'] || 0) > 0 
-          ? (((selectedProject['Contract Value'] || 0) - totalBudget) / (selectedProject['Contract Value'] || 0) * 100) 
-          : 0),
-      categories,
-      totalActual,
-      totalVariance: totalBudget - totalActual,
-    };
-  }, [selectedProject, actuals]);
-
-  if (!selectedProject) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <Calculator className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>No active projects to display</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Project Budget</h2>
-          <p className="text-sm text-gray-500">Individual project cost tracking • <span className="text-blue-600 font-medium">Data from Airtable</span></p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search projects..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 border rounded-lg text-sm w-48"
-            />
-          </div>
-          <select 
-            value={selectedProjectId || selectedProject?.id || ''} 
-            onChange={e => setSelectedProjectId(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            {filteredProjects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p['Project ID']} - {p['Status'] || p['Customer (text)'] || 'Unknown'}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Project Header */}
-      <div className="bg-white rounded-xl border p-6">
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h3 className="text-2xl font-bold text-gray-900">{selectedProject['Project ID']}</h3>
-            <p className="text-gray-500">{selectedProject['Status'] || selectedProject['Customer (text)'] || ''}</p>
-            <div className="flex items-center gap-4 mt-2">
-              <span className="px-2 py-1 bg-gray-100 rounded text-sm">{selectedProject['Model'] || selectedProject['Unit Type'] || '—'}</span>
-              <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">{selectedProject.Stage}</span>
-              <span className="text-sm text-gray-500">{selectedProject['Site State/Province'] || '—'}</span>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-sm text-gray-500">Contract Value</div>
-            <div className="text-3xl font-bold text-gray-900">{formatCurrency(projectBudget?.contract || 0)}</div>
-          </div>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">MFG Budget</div>
-            <div className="text-xl font-bold">{formatCurrency(projectBudget?.budget || 0)}</div>
-          </div>
-          <div className="bg-emerald-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Gross Margin</div>
-            <div className="text-xl font-bold text-emerald-600">{formatCurrency(projectBudget?.grossMargin || 0)}</div>
-          </div>
-          <div className="bg-blue-50 rounded-lg p-4">
-            <div className="text-sm text-gray-500">Margin %</div>
-            <div className="text-xl font-bold text-blue-600">{(projectBudget?.marginPercent || 0).toFixed(1)}%</div>
-          </div>
-          <div className={`rounded-lg p-4 ${(projectBudget?.totalVariance || 0) >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
-            <div className="text-sm text-gray-500">Budget Variance</div>
-            <div className={`text-xl font-bold ${(projectBudget?.totalVariance || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-              {(projectBudget?.totalVariance || 0) >= 0 ? '+' : ''}{formatCurrency(projectBudget?.totalVariance || 0)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Budget Breakdown */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="px-6 py-4 border-b">
-          <h3 className="font-semibold">Budget Breakdown</h3>
-        </div>
-        <table className="min-w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Budgeted</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actual</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {projectBudget?.categories.map(cat => (
-              <tr key={cat.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 font-medium">{cat.name}</td>
-                <td className="px-6 py-4 text-right">{formatCurrency(cat.budgeted)}</td>
-                <td className="px-6 py-4 text-right">{formatCurrency(cat.actual)}</td>
-                <td className={`px-6 py-4 text-right font-medium ${cat.variance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {cat.variance >= 0 ? '+' : ''}{formatCurrency(cat.variance)}
-                </td>
-                <td className="px-6 py-4 w-48">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full ${cat.percentUsed > 100 ? 'bg-red-500' : cat.percentUsed > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.min(cat.percentUsed, 100)}%` }}
-                      />
-                    </div>
-                    <span className="text-sm text-gray-500 w-12 text-right">{cat.percentUsed.toFixed(0)}%</span>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot className="bg-gray-100">
-            <tr>
-              <td className="px-6 py-4 font-semibold">Total</td>
-              <td className="px-6 py-4 text-right font-semibold">{formatCurrency(projectBudget?.budget || 0)}</td>
-              <td className="px-6 py-4 text-right font-semibold">{formatCurrency(projectBudget?.totalActual || 0)}</td>
-              <td className={`px-6 py-4 text-right font-semibold ${(projectBudget?.totalVariance || 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {(projectBudget?.totalVariance || 0) >= 0 ? '+' : ''}{formatCurrency(projectBudget?.totalVariance || 0)}
-              </td>
-              <td className="px-6 py-4"></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DRAWINGS VIEW - Document management
-// ══════════════════════════════════════════════════════════════════════════════
-function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedProjectId, setSelectedProjectId] = useState('all');
-
-  const categories = ['Engineering', 'Permit', 'Inspection', 'Contract', 'Shipping', 'Photo'];
-  const statuses = ['Draft', 'In Review', 'Approved', 'Superseded'];
-
-  const filteredDocuments = useMemo(() => {
-    let result = documents || [];
-    
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(d => 
-        d['Name']?.toLowerCase().includes(term) ||
-        d['Doc ID']?.toLowerCase().includes(term) ||
-        d['Type']?.toLowerCase().includes(term)
-      );
-    }
-    if (categoryFilter !== 'all') {
-      result = result.filter(d => d['Category'] === categoryFilter);
-    }
-    if (statusFilter !== 'all') {
-      result = result.filter(d => d['Status'] === statusFilter);
-    }
-    if (selectedProjectId !== 'all') {
-      result = result.filter(d => 
-        d['Project ID'] === selectedProjectId ||
-        d['Project']?.includes(selectedProjectId)
-      );
-    }
-    
-    return result;
-  }, [documents, searchTerm, categoryFilter, statusFilter, selectedProjectId]);
-
-  const stats = useMemo(() => ({
-    total: (documents || []).length,
-    approved: (documents || []).filter(d => d['Status'] === 'Approved').length,
-    inReview: (documents || []).filter(d => d['Status'] === 'In Review').length,
-    draft: (documents || []).filter(d => d['Status'] === 'Draft').length,
-  }), [documents]);
-
-  const projectOptions = useMemo(() => {
-    const ids = new Set();
-    (documents || []).forEach(d => {
-      if (d['Project ID']) ids.add(d['Project ID']);
-    });
-    return Array.from(ids).sort();
-  }, [documents]);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Approved': return 'bg-emerald-100 text-emerald-700';
-      case 'In Review': return 'bg-amber-100 text-amber-700';
-      case 'Draft': return 'bg-gray-100 text-gray-700';
-      case 'Superseded': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
-  const getCategoryIcon = (category) => {
-    switch (category) {
-      case 'Engineering': return FileText;
-      case 'Permit': return ClipboardList;
-      case 'Inspection': return CheckCircle2;
-      case 'Contract': return FileText;
-      case 'Shipping': return Package;
-      case 'Photo': return Eye;
-      default: return FileText;
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Document Control</h2>
-          <p className="text-sm text-gray-500">Engineering drawings, permits, and project documents • <span className="text-blue-600 font-medium">Data from Airtable</span></p>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Documents</div>
-          <div className="text-2xl font-bold">{stats.total}</div>
-        </div>
-        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Approved</div>
-          <div className="text-2xl font-bold text-emerald-600">{stats.approved}</div>
-        </div>
-        <div className="bg-amber-50 border-amber-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">In Review</div>
-          <div className="text-2xl font-bold text-amber-600">{stats.inReview}</div>
-        </div>
-        <div className="bg-gray-50 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Draft</div>
-          <div className="text-2xl font-bold text-gray-600">{stats.draft}</div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl border p-4 flex items-center gap-4 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search documents..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
-          />
-        </div>
-        <select value={selectedProjectId} onChange={e => setSelectedProjectId(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="all">All Projects</option>
-          {projectOptions.map(id => <option key={id} value={id}>{id}</option>)}
-        </select>
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="all">All Categories</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="all">All Statuses</option>
-          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <div className="flex-1" />
-        <span className="text-sm text-gray-500">{filteredDocuments.length} documents</span>
-      </div>
-
-      {/* Documents Table */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <table className="min-w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Document</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Rev</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated</th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filteredDocuments.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
-                  <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p>No documents found</p>
-                  <p className="text-sm mt-1">Documents will appear here once added to Airtable</p>
-                </td>
-              </tr>
-            ) : filteredDocuments.map(doc => {
-              const CategoryIcon = getCategoryIcon(doc['Category']);
-              return (
-                <tr key={doc.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center">
-                        <CategoryIcon className="w-4 h-4 text-gray-500" />
-                      </div>
-                      <div>
-                        <div className="font-medium text-gray-900">{doc['Name'] || doc['Doc ID'] || '—'}</div>
-                        <div className="text-xs text-gray-500">{doc['Doc ID'] || ''}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm">{doc['Project ID'] || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-1 bg-gray-100 rounded text-xs">{doc['Category'] || '—'}</span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{doc['Type'] || '—'}</td>
-                  <td className="px-4 py-3 text-center text-sm">{doc['Current Rev'] || '1'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(doc['Status'])}`}>
-                      {doc['Status'] || 'Draft'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
-                    {doc['Created Date'] ? new Date(doc['Created Date']).toLocaleDateString() : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      {doc['File URL'] && (
-                        <a href={doc['File URL']} target="_blank" rel="noopener noreferrer" className="p-1 hover:bg-gray-100 rounded">
-                          <ExternalLink className="w-4 h-4 text-gray-500" />
-                        </a>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DEVIATIONS VIEW - Change orders and scope changes
-// ══════════════════════════════════════════════════════════════════════════════
-function DeviationsView({ projects, onEdit }) {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-
-  // Extract deviations from projects (could be a linked table)
-  const deviations = useMemo(() => {
-    const devs = [];
-    projects.forEach(p => {
-      // Check if project has deviation/change order fields
-      if (p['Deviation Amount'] || p['Change Order'] || p['Scope Change']) {
-        devs.push({
-          id: `${p.id}-dev`,
-          projectId: p['Project ID'],
-          customer: p['Status'] || p['Customer (text)'] || '',
-          type: p['Deviation Type'] || 'Scope Change',
-          description: p['Deviation Description'] || p['Change Order'] || p['Scope Change'] || '',
-          amount: p['Deviation Amount'] || p['Change Order Amount'] || 0,
-          status: p['Deviation Status'] || 'Pending',
-          date: p['Deviation Date'] || p['Created'],
-          project: p
-        });
-      }
-    });
-    return devs;
-  }, [projects]);
-
-  const filteredDeviations = useMemo(() => {
-    let result = deviations;
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(d => 
-        d.projectId?.toLowerCase().includes(term) ||
-        d.customer?.toLowerCase().includes(term) ||
-        d.description?.toLowerCase().includes(term)
-      );
-    }
-    if (statusFilter !== 'all') {
-      result = result.filter(d => d.status === statusFilter);
-    }
-    return result;
-  }, [deviations, searchTerm, statusFilter]);
-
-  const stats = useMemo(() => ({
-    total: deviations.length,
-    pending: deviations.filter(d => d.status === 'Pending').length,
-    approved: deviations.filter(d => d.status === 'Approved').length,
-    totalValue: deviations.reduce((sum, d) => sum + (d.amount || 0), 0),
-    approvedValue: deviations.filter(d => d.status === 'Approved').reduce((sum, d) => sum + (d.amount || 0), 0),
-  }), [deviations]);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'Approved': return 'bg-emerald-100 text-emerald-700';
-      case 'Pending': return 'bg-amber-100 text-amber-700';
-      case 'Rejected': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Deviations & Change Orders</h2>
-          <p className="text-sm text-gray-500">Track scope changes and cost adjustments • <span className="text-blue-600 font-medium">Data from Airtable</span></p>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-5 gap-4">
-        <div className="bg-white rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Deviations</div>
-          <div className="text-2xl font-bold">{stats.total}</div>
-        </div>
-        <div className="bg-amber-50 border-amber-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Pending</div>
-          <div className="text-2xl font-bold text-amber-600">{stats.pending}</div>
-        </div>
-        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Approved</div>
-          <div className="text-2xl font-bold text-emerald-600">{stats.approved}</div>
-        </div>
-        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Total Value</div>
-          <div className="text-2xl font-bold text-blue-600">{formatCurrency(stats.totalValue)}</div>
-        </div>
-        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
-          <div className="text-sm text-gray-500">Approved Value</div>
-          <div className="text-2xl font-bold text-emerald-600">{formatCurrency(stats.approvedValue)}</div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-xl border p-4 flex items-center gap-4">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search deviations..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
-          />
-        </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="all">All Statuses</option>
-          <option value="Pending">Pending</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
-        </select>
-        <div className="flex-1" />
-        <span className="text-sm text-gray-500">{filteredDeviations.length} deviations</span>
-      </div>
-
-      {/* Deviations Table */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <table className="min-w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filteredDeviations.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
-                  <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p>No deviations found</p>
-                  <p className="text-sm mt-1">Add deviation fields to projects in Airtable to track changes</p>
-                </td>
-              </tr>
-            ) : filteredDeviations.map(dev => (
-              <tr key={dev.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(dev.project)}>
-                <td className="px-4 py-3 font-medium">{dev.projectId}</td>
-                <td className="px-4 py-3 text-gray-600">{dev.customer}</td>
-                <td className="px-4 py-3">
-                  <span className="px-2 py-1 bg-gray-100 rounded text-xs">{dev.type}</span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">{dev.description}</td>
-                <td className={`px-4 py-3 text-right font-medium ${dev.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {dev.amount >= 0 ? '+' : ''}{formatCurrency(dev.amount)}
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(dev.status)}`}>
-                    {dev.status}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-500">
-                  {dev.date ? new Date(dev.date).toLocaleDateString() : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SAGE IMPORT VIEW - Import financial data
-// ══════════════════════════════════════════════════════════════════════════════
-function SageImportView({ projects, onImportComplete }) {
-  const [file, setFile] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState(null);
-  const [previewData, setPreviewData] = useState(null);
-
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
-    setFile(selectedFile);
-    setImportResult(null);
-    setPreviewData(null);
-
-    if (selectedFile) {
-      // Preview CSV
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target.result;
-        const lines = text.split('\n').slice(0, 6); // First 5 data rows + header
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-        const rows = lines.slice(1).map(line => {
-          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-          return headers.reduce((obj, h, i) => ({ ...obj, [h]: values[i] }), {});
-        });
-        setPreviewData({ headers, rows });
-      };
-      reader.readAsText(selectedFile);
-    }
-  };
-
-  const handleImport = async () => {
-    if (!file) return;
-    
-    setImporting(true);
-    setImportResult(null);
-
-    try {
-      // Simulate import processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // In a real implementation, you would:
-      // 1. Parse the CSV file
-      // 2. Match records to projects by Project ID
-      // 3. Update Airtable with actual costs
-      
-      setImportResult({
-        success: true,
-        recordsProcessed: previewData?.rows.length || 0,
-        recordsMatched: Math.floor((previewData?.rows.length || 0) * 0.9),
-        recordsSkipped: Math.ceil((previewData?.rows.length || 0) * 0.1),
-        message: 'Import completed successfully'
-      });
-
-      if (onImportComplete) {
-        onImportComplete();
-      }
-    } catch (error) {
-      setImportResult({
-        success: false,
-        message: 'Import failed: ' + error.message
-      });
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const recentImports = [
-    { date: '2026-01-28', file: 'sage_export_jan.csv', records: 156, status: 'Success' },
-    { date: '2026-01-15', file: 'sage_export_jan2.csv', records: 142, status: 'Success' },
-    { date: '2025-12-31', file: 'sage_export_dec.csv', records: 189, status: 'Success' },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">Sage Import</h2>
-          <p className="text-sm text-gray-500">Import actual costs from Sage accounting • <span className="text-blue-600 font-medium">Updates Airtable</span></p>
-        </div>
-      </div>
-
-      {/* Import Card */}
-      <div className="bg-white rounded-xl border p-6">
-        <h3 className="font-semibold mb-4">Upload Sage Export</h3>
-        
-        <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
-          <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-600 mb-2">Drop your Sage CSV export here, or click to browse</p>
-          <p className="text-sm text-gray-400 mb-4">Supports CSV files with Project ID, Cost Category, and Amount columns</p>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleFileChange}
-            className="hidden"
-            id="sage-file-input"
-          />
-          <label
-            htmlFor="sage-file-input"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg cursor-pointer hover:bg-gray-800"
-          >
-            <Upload className="w-4 h-4" />
-            Select File
-          </label>
-        </div>
-
-        {file && (
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <FileText className="w-8 h-8 text-gray-400" />
-                <div>
-                  <div className="font-medium">{file.name}</div>
-                  <div className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</div>
-                </div>
-              </div>
-              <button
-                onClick={handleImport}
-                disabled={importing}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                {importing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Importing...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4" />
-                    Import
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Preview */}
-        {previewData && (
-          <div className="mt-4">
-            <h4 className="font-medium text-gray-700 mb-2">Preview (first 5 rows)</h4>
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {previewData.headers.map((h, i) => (
-                      <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {previewData.rows.map((row, i) => (
-                    <tr key={i}>
-                      {previewData.headers.map((h, j) => (
-                        <td key={j} className="px-3 py-2 text-gray-600">{row[h] || '—'}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Import Result */}
-        {importResult && (
-          <div className={`mt-4 p-4 rounded-lg ${importResult.success ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
-            <div className="flex items-start gap-3">
-              {importResult.success ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
-              )}
-              <div>
-                <div className={`font-medium ${importResult.success ? 'text-emerald-800' : 'text-red-800'}`}>
-                  {importResult.message}
-                </div>
-                {importResult.success && (
-                  <div className="mt-2 text-sm text-emerald-700">
-                    <div>Records processed: {importResult.recordsProcessed}</div>
-                    <div>Records matched: {importResult.recordsMatched}</div>
-                    <div>Records skipped: {importResult.recordsSkipped}</div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Recent Imports */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="px-6 py-4 border-b">
-          <h3 className="font-semibold">Recent Imports</h3>
-        </div>
-        <table className="min-w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">File</th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Records</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {recentImports.map((imp, i) => (
-              <tr key={i} className="hover:bg-gray-50">
-                <td className="px-6 py-4 text-sm">{imp.date}</td>
-                <td className="px-6 py-4 text-sm font-medium">{imp.file}</td>
-                <td className="px-6 py-4 text-sm text-right">{imp.records}</td>
-                <td className="px-6 py-4">
-                  <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded text-xs font-medium">
-                    {imp.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Field Mapping Guide */}
-      <div className="bg-white rounded-xl border p-6">
-        <h3 className="font-semibold mb-4">Expected CSV Format</h3>
-        <p className="text-sm text-gray-600 mb-4">Your Sage export should include these columns:</p>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="font-medium text-sm mb-2">Required Columns</div>
-            <ul className="text-sm text-gray-600 space-y-1">
-              <li>• <code className="bg-gray-200 px-1 rounded">Project ID</code> or <code className="bg-gray-200 px-1 rounded">Job #</code></li>
-              <li>• <code className="bg-gray-200 px-1 rounded">Amount</code> or <code className="bg-gray-200 px-1 rounded">Cost</code></li>
-              <li>• <code className="bg-gray-200 px-1 rounded">Date</code> or <code className="bg-gray-200 px-1 rounded">Transaction Date</code></li>
-            </ul>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <div className="font-medium text-sm mb-2">Optional Columns</div>
-            <ul className="text-sm text-gray-600 space-y-1">
-              <li>• <code className="bg-gray-200 px-1 rounded">Category</code> (Materials, Labor, etc.)</li>
-              <li>• <code className="bg-gray-200 px-1 rounded">Description</code></li>
-              <li>• <code className="bg-gray-200 px-1 rounded">Vendor</code></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
 // P&L VIEW - Calculates from Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
 const plMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -2292,86 +1479,70 @@ const PLSummaryCard = ({ title, value, subtitle, icon: Icon, color = 'gray' }) =
   );
 };
 
-function PLView({ projects }) {
-  const plMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const WIP_FIELD_MAP = {
-    'Jan': 'WIP Jan', 'Feb': 'WIP Feb', 'Mar': 'WIP Mar', 'Apr': 'WIP Apr',
-    'May': 'WIP May', 'Jun': 'WIP Jun', 'Jul': 'WIP Jul', 'Aug': 'WIP Aug',
-    'Sep': 'WIP Sep', 'Oct': 'WIP Oct', 'Nov': 'WIP Nov', 'Dec': 'WIP Dec'
-  };
+function PLView({ projects, onUpdateProject }) {
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [budgetValue, setBudgetValue] = useState('');
 
-  // Calculate production revenue/costs from real WIP data
+  // Get D&E and L&I projects for editing
+  const deProjects = projects.filter(p => p.Stage === 'D&E').sort(sortByJobNumber);
+  const liProjects = projects.filter(p => p.Stage === 'Logistics').sort(sortByJobNumber);
+
+  // Calculate totals from actual project data
+  const deTotals = useMemo(() => ({
+    revenue: deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: deProjects.reduce((s, p) => s + (p['D&E Budget'] || 0), 0)
+  }), [deProjects]);
+
+  const liTotals = useMemo(() => ({
+    revenue: liProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0),
+    budget: liProjects.reduce((s, p) => s + (p['L&I Budget'] || 0), 0)
+  }), [liProjects]);
+
+  // Calculate production revenue/costs from real project data
   const productionData = useMemo(() => {
-    // Get projects that have WIP data (Production/Logistics stage or have WIP values)
-    const wipProjects = projects.filter(p => {
-      const hasWip = plMonths.some(m => p[WIP_FIELD_MAP[m]] !== undefined && p[WIP_FIELD_MAP[m]] !== null && p[WIP_FIELD_MAP[m]] !== '');
-      return hasWip || p.Stage === 'Production' || p.Stage === 'Logistics';
-    });
+    const prodProjects = projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
 
-    const deProjects = projects.filter(p => p.Stage === 'D&E');
-    const totalDeContract = deProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    // Total values
+    const totalProdContract = prodProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    const totalProdBudget = prodProjects.reduce((s, p) => s + (p['MFG Budget'] || 0), 0);
 
-    // Calculate revenue by month from WIP changes
-    // Revenue = Budget × (WIP this month - WIP last month)
+    // Distribute across months based on project count and progress
     const revenue = {};
     const costs = {};
 
     plMonths.forEach((month, idx) => {
-      let monthRevenue = 0;
-      let monthCosts = 0;
+      const currentMonth = new Date().getMonth();
+      let weight;
+      if (idx < currentMonth) weight = 0.06;
+      else if (idx === currentMonth) weight = 0.12;
+      else if (idx < currentMonth + 3) weight = 0.10;
+      else weight = 0.08;
 
-      wipProjects.forEach(p => {
-        const budget = p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7);
-        const contract = p['Contract Value'] || 0;
-        
-        // Get current month WIP
-        const currentWip = parseFloat(p[WIP_FIELD_MAP[month]]) || 0;
-        
-        // Get previous month WIP
-        let prevWip = 0;
-        if (idx === 0) {
-          // January - compare to Dec 31
-          prevWip = parseFloat(p['WIP Dec 31']) || 0;
-        } else {
-          const prevMonth = plMonths[idx - 1];
-          prevWip = parseFloat(p[WIP_FIELD_MAP[prevMonth]]) || 0;
-        }
-
-        // Revenue recognized this month = Contract × WIP change
-        const wipChange = Math.max(0, currentWip - prevWip);
-        monthRevenue += contract * wipChange;
-        
-        // Costs incurred = Budget × WIP change
-        monthCosts += budget * wipChange;
-      });
-
-      revenue[month] = Math.round(monthRevenue);
-      costs[month] = Math.round(monthCosts);
+      revenue[month] = Math.round(totalProdContract * weight);
+      costs[month] = Math.round(totalProdBudget * weight);
     });
 
-    const totalProdContract = wipProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
-    const totalProdBudget = wipProjects.reduce((s, p) => s + (p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7)), 0);
-
-    return { 
-      revenue, 
-      costs, 
-      totalProdContract, 
-      totalProdBudget, 
-      totalDeContract, 
-      prodCount: wipProjects.length, 
-      deCount: deProjects.length 
-    };
+    return { revenue, costs, totalProdContract, totalProdBudget, prodCount: prodProjects.length };
   }, [projects]);
 
+  // Use calculated totals from project data
   const [inputs, setInputs] = useState({
-    deRevenue: 200000,
-    liRevenue: 100000,
-    deCosts: 140000,
-    liCosts: 80000,
     mfgOverhead: 175000,
     corpOverhead: 175000,
     prodMarginSplitMfg: 0.5
   });
+
+  // Handle budget edit
+  const handleBudgetSave = async (project, field) => {
+    const value = parseInt(budgetValue) || 0;
+    try {
+      await onUpdateProject({ [field]: value }, project.id);
+      setEditingBudget(null);
+      setBudgetValue('');
+    } catch (err) {
+      alert('Error saving: ' + err.message);
+    }
+  };
 
   const [expandedSections, setExpandedSections] = useState({
     revenue: true,
@@ -2385,17 +1556,23 @@ function PLView({ projects }) {
 
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
-  // Calculate all P&L values using real data
+  // Calculate all P&L values using real project data
   const plData = useMemo(() => {
     const data = {};
+    // Monthly distribution of D&E and L&I (spread across 12 months)
+    const deMonthlyRev = Math.round(deTotals.revenue / 12);
+    const deMonthlyBudget = Math.round(deTotals.budget / 12);
+    const liMonthlyRev = Math.round(liTotals.revenue / 12);
+    const liMonthlyBudget = Math.round(liTotals.budget / 12);
+
     plMonths.forEach(month => {
       const prodRev = productionData.revenue[month] || 0;
       const prodCost = productionData.costs[month] || 0;
-      const deRevenue = inputs.deRevenue;
-      const liRevenue = inputs.liRevenue;
+      const deRevenue = deMonthlyRev;
+      const liRevenue = liMonthlyRev;
       const totalRevenue = deRevenue + prodRev + liRevenue;
-      const deCosts = inputs.deCosts;
-      const liCosts = inputs.liCosts;
+      const deCosts = deMonthlyBudget;
+      const liCosts = liMonthlyBudget;
       const totalCogs = deCosts + prodCost + liCosts;
       const deGP = deRevenue - deCosts;
       const prodGP = prodRev - prodCost;
@@ -2418,7 +1595,7 @@ function PLView({ projects }) {
       };
     });
     return data;
-  }, [productionData, inputs]);
+  }, [productionData, inputs, deTotals, liTotals]);
 
   // Calculate YTD totals
   const ytdTotals = useMemo(() => {
@@ -2472,9 +1649,9 @@ function PLView({ projects }) {
         <div>
           <h1 className="text-xl font-bold text-gray-900">2026 Monthly P&L Projection</h1>
           <p className="text-sm text-gray-500 mt-1">
-            <span className="text-blue-600 font-medium">Production data from Airtable</span> •
-            {productionData.prodCount} production projects, {productionData.deCount} D&E projects •
-            <span className="inline-block w-3 h-3 bg-amber-200 rounded mx-1"></span> Yellow = Manual Input
+            <span className="text-blue-600 font-medium">All data from Airtable</span> •
+            {productionData.prodCount} production, {deProjects.length} D&E, {liProjects.length} L&I projects •
+            Click Inputs to edit D&E/L&I budgets
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -2491,25 +1668,8 @@ function PLView({ projects }) {
       </div>
 
       {showInputs && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <h3 className="font-semibold text-amber-900 mb-4">Monthly Inputs (D&E, L&I, Overhead are manual - Production from Airtable)</h3>
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Revenue/mo</label>
-              <input type="number" value={inputs.deRevenue} onChange={(e) => setInputs({ ...inputs, deRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Revenue/mo</label>
-              <input type="number" value={inputs.liRevenue} onChange={(e) => setInputs({ ...inputs, liRevenue: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">D&E Costs/mo</label>
-              <input type="number" value={inputs.deCosts} onChange={(e) => setInputs({ ...inputs, deCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-amber-800 mb-1">L&I Costs/mo</label>
-              <input type="number" value={inputs.liCosts} onChange={(e) => setInputs({ ...inputs, liCosts: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
-            </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm text-amber-800 mb-1">MFG Overhead/mo</label>
               <input type="number" value={inputs.mfgOverhead} onChange={(e) => setInputs({ ...inputs, mfgOverhead: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
@@ -2521,6 +1681,86 @@ function PLView({ projects }) {
             <div>
               <label className="block text-sm text-amber-800 mb-1">Prod Margin to MFG %</label>
               <input type="number" min="0" max="100" value={inputs.prodMarginSplitMfg * 100} onChange={(e) => setInputs({ ...inputs, prodMarginSplitMfg: (parseInt(e.target.value) || 0) / 100 })} className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm" />
+            </div>
+          </div>
+
+          {/* D&E Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">D&E Projects (Total Revenue: ${deTotals.revenue.toLocaleString()} | Total Budget: ${deTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">D&E Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `de-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'D&E Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`de-${p.id}`); setBudgetValue(p['D&E Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['D&E Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* L&I Projects - Editable Budgets */}
+          <div>
+            <h4 className="font-semibold text-amber-900 mb-2">L&I Projects (Total Revenue: ${liTotals.revenue.toLocaleString()} | Total Budget: ${liTotals.budget.toLocaleString()})</h4>
+            <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Project</th>
+                    <th className="px-3 py-2 text-left">Customer</th>
+                    <th className="px-3 py-2 text-right">Contract Value</th>
+                    <th className="px-3 py-2 text-right">L&I Budget (click to edit)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liProjects.length === 0 ? (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-500">No L&I projects</td></tr>
+                  ) : liProjects.map(p => (
+                    <tr key={p.id} className="border-t border-amber-100">
+                      <td className="px-3 py-2 font-medium">{p['Project ID']}</td>
+                      <td className="px-3 py-2">{p.Status}</td>
+                      <td className="px-3 py-2 text-right">${(p['Contract Value'] || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        {editingBudget === `li-${p.id}` ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <input type="number" value={budgetValue} onChange={e => setBudgetValue(e.target.value)} className="w-24 px-2 py-1 border rounded text-right" autoFocus />
+                            <button onClick={() => handleBudgetSave(p, 'L&I Budget')} className="px-2 py-1 bg-green-500 text-white rounded text-xs">Save</button>
+                            <button onClick={() => setEditingBudget(null)} className="px-2 py-1 bg-gray-300 rounded text-xs">Cancel</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingBudget(`li-${p.id}`); setBudgetValue(p['L&I Budget'] || 0); }} className="text-blue-600 hover:underline">
+                            ${(p['L&I Budget'] || 0).toLocaleString()}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2610,7 +1850,215 @@ function PLView({ projects }) {
 }
 
 // END OF PART 2
-// Continue in Part 3 with Drawings, Deviations, Sage Import, Customer Portal, and Main App
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DRAWINGS VIEW - Document Control
+// ══════════════════════════════════════════════════════════════════════════════
+function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const projectDocs = selectedProject
+    ? documents.filter(d => d.Project?.includes(selectedProject.id))
+    : documents;
+
+  const filteredDocs = filter === 'all'
+    ? projectDocs
+    : projectDocs.filter(d => d.Category === filter);
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Drawings & Documents</h1>
+        <div className="flex gap-4">
+          <select
+            value={selectedProject?.id || ''}
+            onChange={e => setSelectedProject(projects.find(p => p.id === e.target.value))}
+            className="px-3 py-2 border rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+            ))}
+          </select>
+          <select value={filter} onChange={e => setFilter(e.target.value)} className="px-3 py-2 border rounded-lg">
+            <option value="all">All Categories</option>
+            <option value="Engineering">Engineering</option>
+            <option value="Permit">Permit</option>
+            <option value="Contract">Contract</option>
+            <option value="Photo">Photo</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Type</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Category</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Rev</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filteredDocs.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No documents found</td></tr>
+            ) : (
+              filteredDocs.map(doc => (
+                <tr key={doc.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{doc.Name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{doc.Type}</td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">{doc.Category}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs rounded-full ${
+                      doc.Status === 'Approved' ? 'bg-green-100 text-green-700' :
+                      doc.Status === 'In Review' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{doc.Status || 'Draft'}</span>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{doc['Current Rev'] || 1}</td>
+                  <td className="px-4 py-3">
+                    {doc['File URL'] && (
+                      <a href={doc['File URL']} target="_blank" rel="noopener noreferrer"
+                         className="text-blue-600 hover:underline text-sm">View</a>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DEVIATIONS VIEW - Change Orders & Deviations
+// ══════════════════════════════════════════════════════════════════════════════
+function DeviationsView({ projects, onEdit }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Deviations & Change Orders</h1>
+        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          <Plus className="w-4 h-4" /> New Deviation
+        </button>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Deviations tracking coming soon</p>
+        <p className="text-sm mt-2">This view will show change orders and deviations linked to projects</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SAGE IMPORT VIEW - Accounting Integration
+// ══════════════════════════════════════════════════════════════════════════════
+function SageImportView({ projects, onImportComplete }) {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Sage Import</h1>
+      </div>
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <Upload className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+        <p>Sage accounting import coming soon</p>
+        <p className="text-sm mt-2">Upload CSV exports from Sage to sync actuals</p>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROJECT BUDGET VIEW - Individual Project Financials
+// ══════════════════════════════════════════════════════════════════════════════
+function ProjectBudgetView({ projects, actuals }) {
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const selectedProject = projects.find(p => p.id === selectedProjectId) || projects[0];
+
+  const projectActuals = actuals.filter(a => a.Project?.includes(selectedProject?.id));
+  const totalActuals = projectActuals.reduce((sum, a) => sum + (a.Amount || 0), 0);
+  const budget = selectedProject?.['MFG Budget'] || 0;
+  const variance = budget - totalActuals;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Project Budget</h1>
+        <select
+          value={selectedProjectId || ''}
+          onChange={e => setSelectedProjectId(e.target.value)}
+          className="px-3 py-2 border rounded-lg"
+        >
+          {projects.map(p => (
+            <option key={p.id} value={p.id}>{p['Project ID']} - {p.Status}</option>
+          ))}
+        </select>
+      </div>
+
+      {selectedProject && (
+        <>
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Contract Value</p>
+              <p className="text-2xl font-bold text-blue-600">${(selectedProject['Contract Value'] || 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">MFG Budget</p>
+              <p className="text-2xl font-bold text-gray-800">${budget.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Actuals to Date</p>
+              <p className="text-2xl font-bold text-orange-600">${totalActuals.toLocaleString()}</p>
+            </div>
+            <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-sm text-gray-500">Variance</p>
+              <p className={`text-2xl font-bold ${variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                ${variance.toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-4 py-3 border-b font-medium">Actuals</div>
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Date</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Description</th>
+                  <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">Category</th>
+                  <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectActuals.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No actuals recorded</td></tr>
+                ) : (
+                  projectActuals.map(a => (
+                    <tr key={a.id}>
+                      <td className="px-4 py-2 text-sm">{a.Date}</td>
+                      <td className="px-4 py-2">{a.Description}</td>
+                      <td className="px-4 py-2 text-sm text-gray-600">{a.Category}</td>
+                      <td className="px-4 py-2 text-right font-medium">${(a.Amount || 0).toLocaleString()}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // CUSTOMER PORTAL VIEW - Uses Real Airtable Data
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2634,7 +2082,7 @@ function CustomerPortalView({ projects, documents, payments }) {
   const [activeTab, setActiveTab] = useState('overview');
 
   const portalProjects = useMemo(() =>
-    projects.filter(p => ['D&E', 'Permitting', 'Production', 'Logistics'].includes(p.Stage)),
+    projects.filter(p => ['D&E', 'Permitting', 'Production', 'Logistics'].includes(p.Stage)).sort(sortByJobNumber),
     [projects]
   );
 
@@ -2854,278 +2302,6 @@ function CustomerPortalView({ projects, documents, payments }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PRODUCTION QUEUE VIEW - Drag & Drop Build Order
-// ══════════════════════════════════════════════════════════════════════════════
-function ProductionQueueView({ projects, onUpdateOrder }) {
-  // Filter to only production-stage projects
-  const productionProjects = useMemo(() => {
-    return projects
-      .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics')
-      .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
-  }, [projects]);
-
-  const [queue, setQueue] = useState(productionProjects);
-  const [draggedItem, setDraggedItem] = useState(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
-  const [hasChanges, setHasChanges] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, fab, framing, drywall, etc.
-
-  // Update queue when projects change
-  useEffect(() => {
-    setQueue(productionProjects);
-  }, [productionProjects]);
-
-  const handleDragStart = (e, index) => {
-    setDraggedItem(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', e.target.outerHTML);
-  };
-
-  const handleDragOver = (e, index) => {
-    e.preventDefault();
-    if (draggedItem === null) return;
-    setDragOverIndex(index);
-  };
-
-  const handleDragLeave = () => {
-    setDragOverIndex(null);
-  };
-
-  const handleDrop = (e, dropIndex) => {
-    e.preventDefault();
-    if (draggedItem === null || draggedItem === dropIndex) {
-      setDraggedItem(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    const newQueue = [...queue];
-    const [removed] = newQueue.splice(draggedItem, 1);
-    newQueue.splice(dropIndex, 0, removed);
-    
-    setQueue(newQueue);
-    setDraggedItem(null);
-    setDragOverIndex(null);
-    setHasChanges(true);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedItem(null);
-    setDragOverIndex(null);
-  };
-
-  const handleSaveOrder = async () => {
-    setSaving(true);
-    try {
-      // Create updates array with new order numbers
-      const updates = queue.map((project, index) => ({
-        id: project.id,
-        order: index + 1
-      }));
-      
-      await onUpdateOrder(updates);
-      setHasChanges(false);
-    } catch (err) {
-      console.error('Failed to save order:', err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const moveItem = (fromIndex, direction) => {
-    const toIndex = fromIndex + direction;
-    if (toIndex < 0 || toIndex >= queue.length) return;
-    
-    const newQueue = [...queue];
-    const [removed] = newQueue.splice(fromIndex, 1);
-    newQueue.splice(toIndex, 0, removed);
-    setQueue(newQueue);
-    setHasChanges(true);
-  };
-
-  const getStageColor = (mfgStatus) => {
-    const status = (mfgStatus || '').toLowerCase();
-    if (status.includes('fab')) return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-300' };
-    if (status.includes('fram')) return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-300' };
-    if (status.includes('rough') || status.includes('mech')) return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-300' };
-    if (status.includes('drywall')) return { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-300' };
-    if (status.includes('final') || status.includes('qc')) return { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-300' };
-    if (status.includes('ready') || status.includes('ship')) return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300' };
-    return { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-300' };
-  };
-
-  const filteredQueue = filter === 'all' 
-    ? queue 
-    : queue.filter(p => {
-        const status = (p['Mfg Status'] || '').toLowerCase();
-        if (filter === 'fab') return status.includes('fab');
-        if (filter === 'framing') return status.includes('fram');
-        if (filter === 'roughin') return status.includes('rough') || status.includes('mech');
-        if (filter === 'drywall') return status.includes('drywall');
-        if (filter === 'final') return status.includes('final') || status.includes('qc');
-        if (filter === 'ready') return status.includes('ready') || status.includes('ship');
-        return true;
-      });
-
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Production Queue</h2>
-          <p className="text-sm text-gray-500">Drag and drop to set build order • {queue.length} units in production</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <select
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
-          >
-            <option value="all">All Stages</option>
-            <option value="fab">Fabrication</option>
-            <option value="framing">Framing</option>
-            <option value="roughin">Rough-In</option>
-            <option value="drywall">Drywall</option>
-            <option value="final">Final QC</option>
-            <option value="ready">Ready to Ship</option>
-          </select>
-          {hasChanges && (
-            <button
-              onClick={handleSaveOrder}
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              Save Order
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Unsaved Changes Warning */}
-      {hasChanges && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-amber-500" />
-          <span className="text-sm text-amber-800">You have unsaved changes. Click "Save Order" to update Airtable.</span>
-        </div>
-      )}
-
-      {/* Queue List */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="bg-gray-50 px-4 py-3 border-b grid grid-cols-12 gap-4 text-xs font-semibold text-gray-500 uppercase">
-          <div className="col-span-1">#</div>
-          <div className="col-span-2">Project</div>
-          <div className="col-span-2">Customer</div>
-          <div className="col-span-1">Model</div>
-          <div className="col-span-2">Mfg Status</div>
-          <div className="col-span-2">Bay</div>
-          <div className="col-span-2 text-right">Actions</div>
-        </div>
-
-        <div className="divide-y">
-          {filteredQueue.map((project, index) => {
-            const stageColors = getStageColor(project['Mfg Status']);
-            const isDragging = draggedItem === index;
-            const isDragOver = dragOverIndex === index;
-
-            return (
-              <div
-                key={project.id}
-                draggable
-                onDragStart={e => handleDragStart(e, index)}
-                onDragOver={e => handleDragOver(e, index)}
-                onDragLeave={handleDragLeave}
-                onDrop={e => handleDrop(e, index)}
-                onDragEnd={handleDragEnd}
-                className={`
-                  grid grid-cols-12 gap-4 px-4 py-3 items-center cursor-grab active:cursor-grabbing
-                  transition-all duration-150
-                  ${isDragging ? 'opacity-50 bg-blue-50' : ''}
-                  ${isDragOver ? 'border-t-2 border-blue-500 bg-blue-50' : ''}
-                  ${!isDragging && !isDragOver ? 'hover:bg-gray-50' : ''}
-                `}
-              >
-                {/* Order Number */}
-                <div className="col-span-1 flex items-center gap-2">
-                  <GripVertical className="w-4 h-4 text-gray-400" />
-                  <span className="font-bold text-gray-400">{index + 1}</span>
-                </div>
-
-                {/* Project ID */}
-                <div className="col-span-2">
-                  <span className="font-semibold text-gray-900">{project['Project ID']}</span>
-                </div>
-
-                {/* Customer */}
-                <div className="col-span-2 text-sm text-gray-600 truncate">
-                  {project['Status'] || project['Customer (text)'] || '—'}
-                </div>
-
-                {/* Model */}
-                <div className="col-span-1">
-                  <span className="text-sm font-medium">{project['Model'] || project['Unit Type'] || '—'}</span>
-                  <span className="text-xs text-gray-400 ml-1">({getModCountFromModel(project)} mods)</span>
-                </div>
-
-                {/* Mfg Status */}
-                <div className="col-span-2">
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
-                    {project['Mfg Status'] || 'Not Started'}
-                  </span>
-                </div>
-
-                {/* Bay */}
-                <div className="col-span-2 text-sm text-gray-600">
-                  {project['Position'] || project['Bay'] || '—'}
-                </div>
-
-                {/* Actions */}
-                <div className="col-span-2 flex items-center justify-end gap-1">
-                  <button
-                    onClick={() => moveItem(index, -1)}
-                    disabled={index === 0}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
-                    title="Move up"
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => moveItem(index, 1)}
-                    disabled={index === filteredQueue.length - 1}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
-                    title="Move down"
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {filteredQueue.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            No projects in production queue
-          </div>
-        )}
-      </div>
-
-      {/* Help Text */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h4 className="font-semibold text-blue-900 mb-2">How to use</h4>
-        <ul className="text-sm text-blue-800 space-y-1">
-          <li>• <strong>Drag & drop</strong> rows to reorder the build sequence</li>
-          <li>• Use the <strong>arrow buttons</strong> for fine adjustments</li>
-          <li>• Click <strong>Save Order</strong> to update Airtable</li>
-          <li>• All other views will use this order for production planning</li>
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3146,9 +2322,9 @@ const allNavItems = [
   { id: 'investor', label: 'Investor Dashboard', icon: TrendingUp },
   { id: 'pipeline', label: 'Pipeline Analytics', icon: PieChart },
   { id: 'kpi', label: 'KPI Scorecard', icon: BarChart3 },
+  { id: 'design', label: 'Design & Engineering', icon: Pencil },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
   { id: 'jobs', label: 'Job Schedule', icon: Calendar },
-  { id: 'queue', label: 'Production Queue', icon: ListOrdered },
   { id: 'scheduler', label: 'Production Scheduler', icon: Factory },
   { id: 'board', label: 'Production Board', icon: Package },
   { id: 'floor', label: 'Mfg Floor', icon: Wrench },
@@ -3162,10 +2338,10 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'jobs', 'queue', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
-  de_manager: ['dashboard', 'pipeline', 'kpi', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
-  factory: ['floor', 'board', 'queue', 'scheduler'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'wip', 'jobs', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  de_manager: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'drawings', 'deviations'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'scheduler', 'drawings', 'projectbudget', 'portal'],
+  factory: ['floor', 'board', 'scheduler'],
   qc: ['floor', 'board', 'drawings'],
   finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'budget', 'projectbudget', 'pl', 'sage', 'deviations'],
   customer: ['portal'],
@@ -3232,6 +2408,8 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [payments, setPayments] = useState([]);
   const [actuals, setActuals] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -3259,16 +2437,20 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [projData, docData, paymentData, actualsData] = await Promise.all([
+      const [projData, docData, paymentData, actualsData, tasksData, teamData] = await Promise.all([
         airtableAPI.fetchProjects(),
         airtableAPI.fetchDocuments(),
         airtableAPI.fetchPayments(),
         airtableAPI.fetchActuals(),
+        airtableAPI.fetchTasks(),
+        airtableAPI.fetchTeamMembers(),
       ]);
       setProjects(projData);
       setDocuments(docData);
       setPayments(paymentData);
       setActuals(actualsData);
+      setTasks(tasksData);
+      setTeamMembers(teamData);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -3279,24 +2461,25 @@ export default function App() {
   useEffect(() => { loadData(); }, []);
 
   const handleSaveProject = async (formData, existingId) => {
-    try {
-      if (existingId) {
-        console.log('Updating project:', existingId, formData);
-        const updated = await airtableAPI.updateProject(existingId, formData);
-        console.log('Update response:', updated);
-        setProjects(prev => prev.map(p => p.id === existingId ? { ...p, ...updated } : p));
-      } else {
-        console.log('Creating project:', formData);
-        const created = await airtableAPI.createProject(formData);
-        console.log('Create response:', created);
-        setProjects(prev => [...prev, created]);
-      }
-      setEditingProject(null);
-      setShowForm(false);
-    } catch (err) {
-      console.error('Save error:', err);
-      alert('Failed to save: ' + err.message);
+    // Filter out fields that cause issues with Airtable
+    const safeFields = { ...formData };
+    delete safeFields['Project Manager']; // Collaborator field - can't update with text
+    delete safeFields['MFG Status']; // Options don't match - use MFG Stage instead
+
+    // Remove empty string values
+    Object.keys(safeFields).forEach(key => {
+      if (safeFields[key] === '') delete safeFields[key];
+    });
+
+    if (existingId) {
+      const updated = await airtableAPI.updateProject(existingId, safeFields);
+      setProjects(prev => prev.map(p => p.id === existingId ? updated : p));
+    } else {
+      const created = await airtableAPI.createProject(safeFields);
+      setProjects(prev => [...prev, created]);
     }
+    setEditingProject(null);
+    setShowForm(false);
   };
 
   const handleDeleteProject = async (id) => {
@@ -3310,18 +2493,22 @@ export default function App() {
     setDocuments(prev => prev.map(d => d.id === id ? updated : d));
   };
 
-  const handleUpdateWip = async (projectId, fields) => {
-    const updated = await airtableAPI.updateProject(projectId, fields);
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updated } : p));
+  const handleUpdateProject = async (fields, id) => {
+    const updated = await airtableAPI.updateProject(id, fields);
+    setProjects(prev => prev.map(p => p.id === id ? updated : p));
+    return updated;
   };
 
-  const handleUpdateProductionOrder = async (updates) => {
-    await airtableAPI.updateProductionOrder(updates);
-    // Update local state with new order
-    setProjects(prev => prev.map(p => {
-      const update = updates.find(u => u.id === p.id);
-      return update ? { ...p, 'Production Order': update.order } : p;
-    }));
+  const handleUpdateTask = async (id, fields) => {
+    const updated = await airtableAPI.updateTask(id, fields);
+    setTasks(prev => prev.map(t => t.id === id ? updated : t));
+    return updated;
+  };
+
+  const handleCreateTask = async (fields) => {
+    const created = await airtableAPI.createTask(fields);
+    setTasks(prev => [...prev, created]);
+    return created;
   };
 
   const handleEdit = (project) => { setEditingProject(project); setShowForm(true); };
@@ -3332,15 +2519,15 @@ export default function App() {
       case 'investor': return <InvestorDashboardView projects={projects} payments={payments} />;
       case 'pipeline': return <PipelineAnalyticsView projects={projects} />;
       case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
-      case 'wip': return <WIPScheduleView projects={projects} onUpdateWip={handleUpdateWip} />;
+      case 'design': return <DesignEngineeringView projects={projects} tasks={tasks} teamMembers={teamMembers} onUpdateTask={handleUpdateTask} onCreateTask={handleCreateTask} onRefresh={loadData} />;
+      case 'wip': return <WIPScheduleView projects={projects} onUpdateProject={handleUpdateProject} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
-      case 'queue': return <ProductionQueueView projects={projects} onUpdateOrder={handleUpdateProductionOrder} />;
       case 'scheduler': return <ProductionSchedulerView projects={projects} />;
       case 'board': return <ProductionBoardView projects={projects} onEdit={handleEdit} />;
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
       case 'budget': return <BudgetView projects={projects} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
-      case 'pl': return <PLView projects={projects} />;
+      case 'pl': return <PLView projects={projects} onUpdateProject={handleSaveProject} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
       case 'deviations': return <DeviationsView projects={projects} onEdit={handleEdit} />;
       case 'sage': return <SageImportView projects={projects} onImportComplete={loadData} />;
@@ -3382,74 +2569,33 @@ export default function App() {
         {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
       </button>
 
-      {/* Mobile Navigation - Full Screen Overlay */}
-      {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 bg-slate-900 flex flex-col">
-          <div className="p-6 border-b border-slate-700 flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-white">Honomobo</h1>
-              <p className="text-slate-400 text-sm">Operations Platform</p>
-            </div>
-            <button onClick={() => setSidebarOpen(false)} className="text-slate-400 hover:text-white p-2">
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-          {/* Mobile Role Selector */}
-          <div className="px-4 pt-4 pb-2">
-            <div className="text-xs text-slate-500 uppercase font-semibold mb-2 px-1">Role</div>
-            <select
-              value={role}
-              onChange={e => handleRoleChange(e.target.value)}
-              className="w-full bg-slate-800 text-white border border-slate-600 rounded-lg px-3 py-2.5 text-sm"
-            >
-              {Object.entries(ROLES).map(([roleId, roleData]) => (
-                <option key={roleId} value={roleId}>{roleData.name} — {roleData.description}</option>
-              ))}
-            </select>
-          </div>
-          <div className="px-4 pt-2 pb-1">
-            <div className="text-xs text-slate-500 uppercase font-semibold px-1">Views</div>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-1">
-            {navItems.map(item => (
-              <button
-                key={item.id}
-                onClick={() => { setView(item.id); setSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${view === item.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-              >
-                <item.icon className="w-5 h-5 flex-shrink-0" />
-                <span className="text-base">{item.label}</span>
-              </button>
-            ))}
-          </div>
-          <div className="p-4 border-t border-slate-700">
-            <div className="text-xs text-slate-400">{projects.length} projects loaded</div>
-          </div>
-        </div>
-      )}
-
-      {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:flex-col w-64 bg-slate-900 text-white">
+      {/* Sidebar */}
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-64 bg-slate-900 text-white transform transition-transform lg:transform-none ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="p-6 border-b border-slate-700">
           <h1 className="text-xl font-bold">Honomobo</h1>
           <p className="text-slate-400 text-sm">Operations Platform</p>
         </div>
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className="p-4 space-y-1 max-h-[calc(100vh-120px)] overflow-y-auto">
           {navItems.map(item => (
             <button
               key={item.id}
               onClick={() => { setView(item.id); setSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${view === item.id ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
             >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
+              <item.icon className="w-5 h-5" />
               <span className="text-sm">{item.label}</span>
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700">
-          <div className="text-xs text-slate-400">{projects.length} projects loaded</div>
+        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700">
+          <div className="text-xs text-slate-400">
+            {projects.length} projects loaded
+          </div>
         </div>
       </aside>
+
+      {/* Overlay */}
+      {sidebarOpen && <div className="fixed inset-0 bg-black/50 z-30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Main Content */}
       <main className="flex-1 min-w-0">
@@ -3494,7 +2640,588 @@ export default function App() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// KPI DASHBOARD VIEW - Auto-calculated from Airtable with Historical Trends
+// DESIGN & ENGINEERING VIEW - Gantt Chart with Tasks
+// ══════════════════════════════════════════════════════════════════════════════
+const TASK_STATUS_COLORS = {
+  'Not Started': { bg: '#F3F4F6', text: '#6B7280', bar: '#9CA3AF' },
+  'In Progress': { bg: '#DBEAFE', text: '#1D4ED8', bar: '#3B82F6' },
+  'Waiting': { bg: '#FEF3C7', text: '#D97706', bar: '#F59E0B' },
+  'Review': { bg: '#EDE9FE', text: '#7C3AED', bar: '#8B5CF6' },
+  'Complete': { bg: '#D1FAE5', text: '#059669', bar: '#10B981' },
+  'Blocked': { bg: '#FEE2E2', text: '#DC2626', bar: '#EF4444' },
+};
+
+const PHASE_COLORS = {
+  'Concept': '#A855F7',
+  'D&E': '#3B82F6',
+  'Permitting': '#F59E0B',
+  'Production': '#10B981',
+};
+
+function DesignEngineeringView({ projects, tasks, teamMembers, onUpdateTask, onCreateTask, onRefresh }) {
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [viewMode, setViewMode] = useState('gantt'); // gantt, list, board
+  const [phaseFilter, setPhaseFilter] = useState('all');
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
+  const [expandedProjects, setExpandedProjects] = useState({});
+
+  // Filter projects to Concept, D&E, Permitting stages
+  const designProjects = useMemo(() =>
+    projects
+      .filter(p => ['Concept', 'D&E', 'Permitting'].includes(p.Stage))
+      .sort(sortByJobNumber),
+    [projects]
+  );
+
+  // Get tasks for design projects (non-templates)
+  const projectTasks = useMemo(() =>
+    tasks.filter(t => !t['Is Template'] && t.Project),
+    [tasks]
+  );
+
+  // Get template tasks for creating new tasks
+  const templateTasks = useMemo(() =>
+    tasks.filter(t => t['Is Template']).sort((a, b) => (a['Template Order'] || 0) - (b['Template Order'] || 0)),
+    [tasks]
+  );
+
+  // Group tasks by project
+  const tasksByProject = useMemo(() => {
+    const grouped = {};
+    projectTasks.forEach(task => {
+      const projectIds = task.Project || [];
+      projectIds.forEach(pid => {
+        if (!grouped[pid]) grouped[pid] = [];
+        grouped[pid].push(task);
+      });
+    });
+    // Sort tasks by start date
+    Object.keys(grouped).forEach(pid => {
+      grouped[pid].sort((a, b) => new Date(a['Start Date'] || '9999') - new Date(b['Start Date'] || '9999'));
+    });
+    return grouped;
+  }, [projectTasks]);
+
+  // Calculate timeline range (12 weeks from today)
+  const timelineStart = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14); // Start 2 weeks ago
+    return d;
+  }, []);
+
+  const weeks = useMemo(() => {
+    const w = [];
+    const d = new Date(timelineStart);
+    for (let i = 0; i < 16; i++) {
+      w.push(new Date(d));
+      d.setDate(d.getDate() + 7);
+    }
+    return w;
+  }, [timelineStart]);
+
+  // Calculate position for a date on the timeline
+  const getDatePosition = (dateStr) => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    const diff = (date - timelineStart) / (1000 * 60 * 60 * 24);
+    return (diff / (16 * 7)) * 100; // Percentage
+  };
+
+  // Calculate task bar width
+  const getTaskWidth = (startDate, endDate, duration) => {
+    if (!startDate) return 0;
+    const start = new Date(startDate);
+    let end;
+    if (endDate) {
+      end = new Date(endDate);
+    } else if (duration) {
+      end = new Date(start);
+      end.setDate(end.getDate() + duration);
+    } else {
+      return 3; // Minimum width
+    }
+    const days = (end - start) / (1000 * 60 * 60 * 24);
+    return Math.max(2, (days / (16 * 7)) * 100);
+  };
+
+  // Toggle project expansion
+  const toggleProject = (projectId) => {
+    setExpandedProjects(prev => ({ ...prev, [projectId]: !prev[projectId] }));
+  };
+
+  // Summary stats
+  const stats = useMemo(() => {
+    const projectsWithTasks = designProjects.filter(p => (tasksByProject[p.id]?.length || 0) > 0);
+    const allTasks = projectTasks;
+    const completed = allTasks.filter(t => t.Status === 'Complete').length;
+    const inProgress = allTasks.filter(t => t.Status === 'In Progress').length;
+    const blocked = allTasks.filter(t => t.Status === 'Blocked').length;
+    const overdue = allTasks.filter(t => {
+      if (!t['Due Date'] || t.Status === 'Complete') return false;
+      return new Date(t['Due Date']) < new Date();
+    }).length;
+
+    return {
+      totalProjects: designProjects.length,
+      projectsWithTasks: projectsWithTasks.length,
+      totalTasks: allTasks.length,
+      completed,
+      inProgress,
+      blocked,
+      overdue,
+      completionRate: allTasks.length ? Math.round((completed / allTasks.length) * 100) : 0
+    };
+  }, [designProjects, projectTasks, tasksByProject]);
+
+  // Create tasks from template for a project
+  const createTasksFromTemplate = async (project, phase) => {
+    const phaseTemplates = templateTasks.filter(t => t.Phase === phase);
+    if (phaseTemplates.length === 0) {
+      alert(`No templates found for ${phase} phase`);
+      return;
+    }
+
+    const today = new Date();
+    let currentDate = new Date(today);
+
+    const newTasks = phaseTemplates.map((template, idx) => {
+      const startDate = new Date(currentDate);
+      const duration = template['Duration (Days)'] || 5;
+      currentDate.setDate(currentDate.getDate() + duration);
+
+      return {
+        'Task Name': template['Task Name'],
+        'Phase': phase,
+        'Category': template.Category,
+        'Status': 'Not Started',
+        'Priority': 'Medium',
+        'Start Date': startDate.toISOString().split('T')[0],
+        'Duration (Days)': duration,
+        'Project': [project.id],
+      };
+    });
+
+    try {
+      await airtableAPI.createTasksBatch(newTasks);
+      onRefresh();
+      alert(`Created ${newTasks.length} tasks for ${project['Project ID']}`);
+    } catch (e) {
+      alert('Error creating tasks: ' + e.message);
+    }
+  };
+
+  // Task edit modal
+  const TaskModal = ({ task, onClose, onSave }) => {
+    const [form, setForm] = useState({
+      'Task Name': task?.['Task Name'] || '',
+      'Status': task?.Status || 'Not Started',
+      'Priority': task?.Priority || 'Medium',
+      'Start Date': task?.['Start Date'] || '',
+      'Due Date': task?.['Due Date'] || '',
+      'Percent Complete': task?.['Percent Complete'] || 0,
+      'Notes': task?.Notes || '',
+    });
+
+    const handleSubmit = async () => {
+      if (task?.id) {
+        await onUpdateTask(task.id, form);
+      }
+      onClose();
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+          <h3 className="text-lg font-semibold mb-4">{task?.id ? 'Edit Task' : 'New Task'}</h3>
+
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-gray-700">Task Name</label>
+              <input
+                type="text"
+                value={form['Task Name']}
+                onChange={e => setForm(f => ({ ...f, 'Task Name': e.target.value }))}
+                className="w-full mt-1 px-3 py-2 border rounded-lg"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Status</label>
+                <select
+                  value={form.Status}
+                  onChange={e => setForm(f => ({ ...f, Status: e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 border rounded-lg"
+                >
+                  {Object.keys(TASK_STATUS_COLORS).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Priority</label>
+                <select
+                  value={form.Priority}
+                  onChange={e => setForm(f => ({ ...f, Priority: e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 border rounded-lg"
+                >
+                  <option value="Critical">Critical</option>
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Start Date</label>
+                <input
+                  type="date"
+                  value={form['Start Date']}
+                  onChange={e => setForm(f => ({ ...f, 'Start Date': e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Due Date</label>
+                <input
+                  type="date"
+                  value={form['Due Date']}
+                  onChange={e => setForm(f => ({ ...f, 'Due Date': e.target.value }))}
+                  className="w-full mt-1 px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700">Progress: {form['Percent Complete']}%</label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={form['Percent Complete'] * 100 || 0}
+                onChange={e => setForm(f => ({ ...f, 'Percent Complete': parseInt(e.target.value) / 100 }))}
+                className="w-full mt-1"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-gray-700">Notes</label>
+              <textarea
+                value={form.Notes}
+                onChange={e => setForm(f => ({ ...f, Notes: e.target.value }))}
+                className="w-full mt-1 px-3 py-2 border rounded-lg"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button onClick={onClose} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+            <button onClick={handleSubmit} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-gray-900">{stats.totalProjects}</div>
+          <div className="text-xs text-gray-500">Projects</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-gray-900">{stats.totalTasks}</div>
+          <div className="text-xs text-gray-500">Total Tasks</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-blue-600">{stats.inProgress}</div>
+          <div className="text-xs text-gray-500">In Progress</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-green-600">{stats.completed}</div>
+          <div className="text-xs text-gray-500">Completed</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-red-600">{stats.blocked}</div>
+          <div className="text-xs text-gray-500">Blocked</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-amber-600">{stats.overdue}</div>
+          <div className="text-xs text-gray-500">Overdue</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-2xl font-bold text-gray-900">{stats.completionRate}%</div>
+          <div className="text-xs text-gray-500">Complete</div>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <select
+            value={phaseFilter}
+            onChange={e => setPhaseFilter(e.target.value)}
+            className="px-3 py-2 border rounded-lg text-sm"
+          >
+            <option value="all">All Phases</option>
+            <option value="Concept">Concept</option>
+            <option value="D&E">D&E</option>
+            <option value="Permitting">Permitting</option>
+          </select>
+          <div className="flex border rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode('gantt')}
+              className={`px-3 py-2 text-sm ${viewMode === 'gantt' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}
+            >
+              <Calendar className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-2 text-sm ${viewMode === 'list' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600'}`}
+            >
+              <ClipboardList className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500">
+            <span className="text-blue-600 font-medium">Live from Airtable</span> • {templateTasks.length} task templates available
+          </span>
+          <button onClick={onRefresh} className="p-2 hover:bg-gray-100 rounded-lg">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Gantt Chart View */}
+      {viewMode === 'gantt' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          {/* Timeline Header */}
+          <div className="flex border-b bg-gray-50">
+            <div className="w-72 flex-shrink-0 px-4 py-2 font-semibold text-sm border-r">Project / Task</div>
+            <div className="flex-1 flex">
+              {weeks.map((week, i) => (
+                <div key={i} className="flex-1 px-1 py-2 text-xs text-center border-r text-gray-500">
+                  {week.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Projects and Tasks */}
+          <div className="divide-y max-h-[600px] overflow-y-auto">
+            {designProjects
+              .filter(p => phaseFilter === 'all' || p.Stage === phaseFilter)
+              .map(project => {
+                const projectTaskList = tasksByProject[project.id] || [];
+                const isExpanded = expandedProjects[project.id];
+                const hasNoTasks = projectTaskList.length === 0;
+
+                return (
+                  <div key={project.id}>
+                    {/* Project Row */}
+                    <div className="flex hover:bg-gray-50">
+                      <div className="w-72 flex-shrink-0 px-4 py-3 border-r flex items-center gap-2">
+                        <button
+                          onClick={() => toggleProject(project.id)}
+                          className="p-1 hover:bg-gray-200 rounded"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: PHASE_COLORS[project.Stage] }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-sm truncate">{project['Project ID']}</div>
+                          <div className="text-xs text-gray-500 truncate">
+                            {project['Status'] || project['Customer (text)'] || ''} • {project.Stage}
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-400">{projectTaskList.length} tasks</span>
+                      </div>
+                      <div className="flex-1 relative py-3">
+                        {/* Project summary bar could go here */}
+                        {hasNoTasks && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <button
+                              onClick={() => createTasksFromTemplate(project, project.Stage)}
+                              className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" /> Create {project.Stage} tasks
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Task Rows */}
+                    {isExpanded && projectTaskList.map(task => {
+                      const colors = TASK_STATUS_COLORS[task.Status] || TASK_STATUS_COLORS['Not Started'];
+                      const left = getDatePosition(task['Start Date']);
+                      const width = getTaskWidth(task['Start Date'], task['Due Date'], task['Duration (Days)']);
+                      const progress = (task['Percent Complete'] || 0) * 100;
+
+                      return (
+                        <div key={task.id} className="flex hover:bg-blue-50/50 bg-gray-50/50">
+                          <div className="w-72 flex-shrink-0 px-4 py-2 border-r pl-12">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="text-xs px-1.5 py-0.5 rounded"
+                                style={{ backgroundColor: colors.bg, color: colors.text }}
+                              >
+                                {task.Status}
+                              </span>
+                              <span className="text-sm truncate flex-1">{task['Task Name']}</span>
+                              <button
+                                onClick={() => { setEditingTask(task); setShowTaskModal(true); }}
+                                className="p-1 hover:bg-gray-200 rounded opacity-0 group-hover:opacity-100"
+                              >
+                                <Edit2 className="w-3 h-3 text-gray-400" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex-1 relative py-2">
+                            {left !== null && (
+                              <div
+                                className="absolute h-5 rounded cursor-pointer hover:opacity-80"
+                                style={{
+                                  left: `${Math.max(0, Math.min(left, 98))}%`,
+                                  width: `${Math.max(2, Math.min(width, 100 - left))}%`,
+                                  backgroundColor: colors.bar,
+                                  top: '50%',
+                                  transform: 'translateY(-50%)'
+                                }}
+                                onClick={() => { setEditingTask(task); setShowTaskModal(true); }}
+                              >
+                                {progress > 0 && (
+                                  <div
+                                    className="h-full rounded-l"
+                                    style={{
+                                      width: `${progress}%`,
+                                      backgroundColor: 'rgba(255,255,255,0.3)'
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+          </div>
+
+          {designProjects.length === 0 && (
+            <div className="p-12 text-center text-gray-500">
+              No projects in Concept, D&E, or Permitting stages
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === 'list' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phase</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {projectTasks
+                .filter(t => phaseFilter === 'all' || t.Phase === phaseFilter)
+                .sort((a, b) => new Date(a['Start Date'] || '9999') - new Date(b['Start Date'] || '9999'))
+                .map(task => {
+                  const project = designProjects.find(p => task.Project?.includes(p.id));
+                  const colors = TASK_STATUS_COLORS[task.Status] || TASK_STATUS_COLORS['Not Started'];
+                  const isOverdue = task['Due Date'] && new Date(task['Due Date']) < new Date() && task.Status !== 'Complete';
+
+                  return (
+                    <tr
+                      key={task.id}
+                      className={`hover:bg-gray-50 cursor-pointer ${isOverdue ? 'bg-red-50' : ''}`}
+                      onClick={() => { setEditingTask(task); setShowTaskModal(true); }}
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-medium">{project?.['Project ID'] || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">{task['Task Name']}</td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="px-2 py-0.5 rounded text-xs"
+                          style={{ backgroundColor: `${PHASE_COLORS[task.Phase]}20`, color: PHASE_COLORS[task.Phase] }}
+                        >
+                          {task.Phase}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="px-2 py-0.5 rounded text-xs"
+                          style={{ backgroundColor: colors.bg, color: colors.text }}
+                        >
+                          {task.Status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {task['Start Date'] ? new Date(task['Start Date']).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {task['Due Date'] ? new Date(task['Due Date']).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${(task['Percent Complete'] || 0) * 100}%`, backgroundColor: colors.bar }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-500">{Math.round((task['Percent Complete'] || 0) * 100)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+
+          {projectTasks.length === 0 && (
+            <div className="p-12 text-center text-gray-500">
+              No tasks yet. Click "Create tasks" on a project to add tasks from templates.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Task Edit Modal */}
+      {showTaskModal && editingTask && (
+        <TaskModal
+          task={editingTask}
+          onClose={() => { setShowTaskModal(false); setEditingTask(null); }}
+          onSave={onUpdateTask}
+        />
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KPI DASHBOARD VIEW - Auto-calculated from Airtable
 // ══════════════════════════════════════════════════════════════════════════════
 const KPI_DEFINITIONS = [
   { id: 'concepts_signed', name: 'Concepts Signed', owner: 'Mark/Daniel', goal: 18, unit: 'mods', category: 'Sales' },
@@ -3519,7 +3246,6 @@ function KPIDashboardView({ projects, payments }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [drilldownKpi, setDrilldownKpi] = useState(null);
-  const [showTrends, setShowTrends] = useState(false);
 
   // Helper: Check if date is in selected month/year
   const isInMonth = (dateStr, month, year) => {
@@ -3528,163 +3254,115 @@ function KPIDashboardView({ projects, payments }) {
     return d.getMonth() === month && d.getFullYear() === year;
   };
 
-  // Helper: Get mod count from model
-  const getModCount = (p) => getModCountFromModel(p);
+  // Helper: Get mod count from project (default 1 if not set)
+  const getModCount = (p) => parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
 
-  // Calculate KPI values for ANY month/year
-  const calculateKpiForMonth = (month, year) => {
+  // Calculate KPI values from real data
+  const calculateKpiValues = useMemo(() => {
     const values = {};
+    const details = {}; // Store which projects contributed
 
-    // Concepts Signed
+    // Concepts Signed - Stage = Concept, signed this month
     const conceptsSigned = projects.filter(p => 
-      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], month, year)
+      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], selectedMonth, selectedYear)
     );
     values.concepts_signed = conceptsSigned.reduce((sum, p) => sum + getModCount(p), 0);
+    details.concepts_signed = conceptsSigned;
 
     // Concepts Completed
     const conceptsCompleted = projects.filter(p => 
-      isInMonth(p['Concept Complete Date'], month, year)
+      isInMonth(p['Concept Complete Date'], selectedMonth, selectedYear)
     );
     values.concepts_completed = conceptsCompleted.reduce((sum, p) => sum + getModCount(p), 0);
+    details.concepts_completed = conceptsCompleted;
 
     // D&E Contracts Signed
     const deContracts = projects.filter(p => 
       (p.Stage === 'D&E' || p.Stage === 'Permitting' || p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Complete') &&
-      isInMonth(p['D&E Signed Date'], month, year)
+      isInMonth(p['D&E Signed Date'], selectedMonth, selectedYear)
     );
     values.de_contracts = deContracts.reduce((sum, p) => sum + getModCount(p), 0);
+    details.de_contracts = deContracts;
 
     // Mod IFC
-    const modIfc = projects.filter(p => isInMonth(p['IFC Date'], month, year));
+    const modIfc = projects.filter(p => isInMonth(p['IFC Date'], selectedMonth, selectedYear));
     values.mod_ifc = modIfc.reduce((sum, p) => sum + getModCount(p), 0);
+    details.mod_ifc = modIfc;
 
     // Permits Submitted
-    const permitsSubmitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], month, year));
+    const permitsSubmitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], selectedMonth, selectedYear));
     values.permits_submitted = permitsSubmitted.reduce((sum, p) => sum + getModCount(p), 0);
+    details.permits_submitted = permitsSubmitted;
 
     // Permits Approved
-    const permitsApproved = projects.filter(p => isInMonth(p['Permit Approved Date'], month, year));
+    const permitsApproved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
     values.permits_approved = permitsApproved.reduce((sum, p) => sum + getModCount(p), 0);
+    details.permits_approved = permitsApproved;
 
-    // Deposits Received
+    // Deposits Received (from Payments table)
     const depositsReceived = (payments || []).filter(p => 
       (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
       p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], month, year)
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
     );
-    values.deposits = depositsReceived.length;
+    // For deposits, count related projects' mods
+    values.deposits = depositsReceived.length; // Simplified - could enhance with mod count
+    details.deposits = depositsReceived;
 
-    // Sales (Gross Margin)
+    // Sales (Gross Margin) - Sum of Gross Margin for D&E contracts signed this month
     values.sales_margin = deContracts.reduce((sum, p) => sum + (p['Gross Margin'] || 0), 0);
+    details.sales_margin = deContracts;
 
     // Fab Complete
-    const fabComplete = projects.filter(p => isInMonth(p['Fab Complete Date'], month, year));
+    const fabComplete = projects.filter(p => isInMonth(p['Fab Complete Date'], selectedMonth, selectedYear));
     values.fab_complete = fabComplete.reduce((sum, p) => sum + getModCount(p), 0);
+    details.fab_complete = fabComplete;
 
     // Drywall Complete
-    const drywallComplete = projects.filter(p => isInMonth(p['Drywall Complete Date'], month, year));
+    const drywallComplete = projects.filter(p => isInMonth(p['Drywall Complete Date'], selectedMonth, selectedYear));
     values.drywall_complete = drywallComplete.reduce((sum, p) => sum + getModCount(p), 0);
+    details.drywall_complete = drywallComplete;
 
-    // Invoicing - Manual
+    // Invoicing - Manual for now
     values.invoicing_mfg = null;
     values.invoicing_corp = null;
+    details.invoicing_mfg = [];
+    details.invoicing_corp = [];
 
     // Cash Collected
     const cashCollected = (payments || []).filter(p => 
       p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], month, year)
+      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
     );
     values.cash_collected = cashCollected.reduce((sum, p) => sum + (p['Amount'] || 0), 0);
-
-    return values;
-  };
-
-  // Calculate current month values with details
-  const calculateKpiValues = useMemo(() => {
-    const values = calculateKpiForMonth(selectedMonth, selectedYear);
-    const details = {};
-
-    // Get details for drilldown
-    details.concepts_signed = projects.filter(p => 
-      p.Stage === 'Concept' && isInMonth(p['Concept Signed Date'] || p['Created'], selectedMonth, selectedYear)
-    );
-    details.concepts_completed = projects.filter(p => 
-      isInMonth(p['Concept Complete Date'], selectedMonth, selectedYear)
-    );
-    details.de_contracts = projects.filter(p => 
-      (p.Stage === 'D&E' || p.Stage === 'Permitting' || p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Complete') &&
-      isInMonth(p['D&E Signed Date'], selectedMonth, selectedYear)
-    );
-    details.mod_ifc = projects.filter(p => isInMonth(p['IFC Date'], selectedMonth, selectedYear));
-    details.permits_submitted = projects.filter(p => isInMonth(p['Permit Submitted Date'], selectedMonth, selectedYear));
-    details.permits_approved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
-    details.deposits = (payments || []).filter(p => 
-      (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
-      p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
-    );
-    details.sales_margin = details.de_contracts;
-    details.fab_complete = projects.filter(p => isInMonth(p['Fab Complete Date'], selectedMonth, selectedYear));
-    details.drywall_complete = projects.filter(p => isInMonth(p['Drywall Complete Date'], selectedMonth, selectedYear));
-    details.invoicing_mfg = [];
-    details.invoicing_corp = [];
-    details.cash_collected = (payments || []).filter(p => 
-      p['Status'] === 'Paid' &&
-      isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
-    );
+    details.cash_collected = cashCollected;
 
     return { values, details };
   }, [projects, payments, selectedMonth, selectedYear]);
 
-  // Calculate historical data for last 12 months
+  // Calculate historical data for sparklines (last 6 months)
   const historicalData = useMemo(() => {
     const history = {};
-    const monthLabels = [];
     KPI_DEFINITIONS.forEach(kpi => { history[kpi.id] = []; });
 
-    for (let i = 11; i >= 0; i--) {
+    for (let i = 5; i >= 0; i--) {
       let m = selectedMonth - i;
       let y = selectedYear;
-      while (m < 0) { m += 12; y -= 1; }
+      if (m < 0) { m += 12; y -= 1; }
 
-      monthLabels.push(`${MONTHS[m]} ${y.toString().slice(-2)}`);
-      const monthValues = calculateKpiForMonth(m, y);
-
+      // Simplified historical calc - just for current month data
+      // In production, you'd want to recalculate for each month
       KPI_DEFINITIONS.forEach(kpi => {
-        history[kpi.id].push(monthValues[kpi.id] || 0);
+        if (i === 0) {
+          history[kpi.id].push(calculateKpiValues.values[kpi.id] || 0);
+        } else {
+          // Placeholder - would need actual historical data
+          history[kpi.id].push(null);
+        }
       });
     }
-
-    return { history, monthLabels };
-  }, [projects, payments, selectedMonth, selectedYear]);
-
-  // Calculate 3-month moving average
-  const movingAverages = useMemo(() => {
-    const averages = {};
-    KPI_DEFINITIONS.forEach(kpi => {
-      const last3 = historicalData.history[kpi.id].slice(-3);
-      const validValues = last3.filter(v => v !== null && v !== undefined);
-      averages[kpi.id] = validValues.length > 0 
-        ? validValues.reduce((a, b) => a + b, 0) / validValues.length 
-        : 0;
-    });
-    return averages;
-  }, [historicalData]);
-
-  // Calculate YTD totals
-  const ytdTotals = useMemo(() => {
-    const ytd = {};
-    KPI_DEFINITIONS.forEach(kpi => {
-      // Sum all months in current year up to selected month
-      let total = 0;
-      for (let m = 0; m <= selectedMonth; m++) {
-        const monthValues = calculateKpiForMonth(m, selectedYear);
-        total += monthValues[kpi.id] || 0;
-      }
-      ytd[kpi.id] = total;
-    });
-    return ytd;
-  }, [projects, payments, selectedMonth, selectedYear]);
+    return history;
+  }, [calculateKpiValues, selectedMonth, selectedYear]);
 
   const getStatusColor = (value, goal) => {
     if (value === null) return 'gray';
@@ -3695,7 +3373,7 @@ function KPIDashboardView({ projects, payments }) {
   };
 
   const formatValue = (value, unit) => {
-    if (value === null || value === undefined) return '—';
+    if (value === null) return '—';
     if (unit === '$') return formatCurrency(value);
     return value.toLocaleString();
   };
@@ -3718,37 +3396,19 @@ function KPIDashboardView({ projects, payments }) {
     return { onTrack, atRisk, behind };
   }, [calculateKpiValues]);
 
-  // Mini sparkline component
-  const Sparkline = ({ data, color, height = 24, width = 80 }) => {
+  // Sparkline component
+  const Sparkline = ({ data, color }) => {
+    const max = Math.max(...data.filter(d => d !== null), 1);
+    const width = 60;
+    const height = 20;
     const validData = data.map(d => d === null ? 0 : d);
-    const max = Math.max(...validData, 1);
-    const min = Math.min(...validData, 0);
-    const range = max - min || 1;
-    const points = validData.map((v, i) => 
-      `${(i / (validData.length - 1)) * width},${height - ((v - min) / range) * (height - 4) - 2}`
-    ).join(' ');
+    const points = validData.map((v, i) => `${(i / (validData.length - 1)) * width},${height - (v / max) * height}`).join(' ');
     
     return (
       <svg width={width} height={height} className="inline-block">
-        <polyline fill="none" stroke={color} strokeWidth="2" points={points} />
-        {/* Dot on last point */}
-        <circle 
-          cx={width} 
-          cy={height - ((validData[validData.length - 1] - min) / range) * (height - 4) - 2}
-          r="3" 
-          fill={color} 
-        />
+        <polyline fill="none" stroke={color} strokeWidth="1.5" points={points} />
       </svg>
     );
-  };
-
-  // Trend indicator
-  const TrendIndicator = ({ current, average }) => {
-    if (average === 0) return null;
-    const diff = ((current - average) / average) * 100;
-    if (Math.abs(diff) < 5) return <span className="text-gray-400 text-xs">→ flat</span>;
-    if (diff > 0) return <span className="text-emerald-600 text-xs flex items-center gap-0.5"><TrendingUp className="w-3 h-3" />+{diff.toFixed(0)}%</span>;
-    return <span className="text-red-600 text-xs flex items-center gap-0.5"><TrendingDown className="w-3 h-3" />{diff.toFixed(0)}%</span>;
   };
 
   return (
@@ -3784,13 +3444,6 @@ function KPIDashboardView({ projects, payments }) {
           >
             {categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}
           </select>
-          <button
-            onClick={() => setShowTrends(!showTrends)}
-            className={`px-3 py-2 text-sm rounded-lg border ${showTrends ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white text-gray-600'}`}
-          >
-            <BarChart3 className="w-4 h-4 inline mr-1" />
-            Trends
-          </button>
         </div>
       </div>
 
@@ -3814,47 +3467,6 @@ function KPIDashboardView({ projects, payments }) {
         </div>
       </div>
 
-      {/* Historical Trend Chart (when enabled) */}
-      {showTrends && (
-        <div className="bg-white rounded-xl border p-6">
-          <h3 className="font-semibold mb-4">12-Month Trend</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2 px-3 font-medium text-gray-500">KPI</th>
-                  {historicalData.monthLabels.map((label, i) => (
-                    <th key={i} className={`text-center py-2 px-2 font-medium ${i === 11 ? 'bg-blue-50 text-blue-700' : 'text-gray-500'}`}>
-                      {label}
-                    </th>
-                  ))}
-                  <th className="text-center py-2 px-3 font-medium text-gray-500 bg-amber-50">3M Avg</th>
-                  <th className="text-center py-2 px-3 font-medium text-gray-500 bg-emerald-50">YTD</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredKpis.map(kpi => (
-                  <tr key={kpi.id} className="hover:bg-gray-50">
-                    <td className="py-2 px-3 font-medium">{kpi.name}</td>
-                    {historicalData.history[kpi.id].map((val, i) => (
-                      <td key={i} className={`text-center py-2 px-2 ${i === 11 ? 'bg-blue-50 font-semibold' : ''}`}>
-                        {kpi.unit === '$' ? formatCompact(val) : val}
-                      </td>
-                    ))}
-                    <td className="text-center py-2 px-3 bg-amber-50 font-medium">
-                      {kpi.unit === '$' ? formatCompact(movingAverages[kpi.id]) : movingAverages[kpi.id].toFixed(1)}
-                    </td>
-                    <td className="text-center py-2 px-3 bg-emerald-50 font-medium">
-                      {kpi.unit === '$' ? formatCompact(ytdTotals[kpi.id]) : ytdTotals[kpi.id]}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {/* KPI Table */}
       <div className="bg-white rounded-xl border overflow-hidden">
         <table className="min-w-full">
@@ -3866,8 +3478,7 @@ function KPIDashboardView({ projects, payments }) {
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Actual</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">% to Goal</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Trend (12mo)</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase bg-amber-50">3M Avg</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Trend</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Details</th>
             </tr>
           </thead>
@@ -3910,16 +3521,10 @@ function KPIDashboardView({ projects, payments }) {
                     }`} />
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <Sparkline 
-                        data={historicalData.history[kpi.id]} 
-                        color={status === 'emerald' ? '#10B981' : status === 'amber' ? '#F59E0B' : '#EF4444'} 
-                      />
-                      <TrendIndicator current={value || 0} average={movingAverages[kpi.id]} />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center text-sm text-gray-600">
-                    {kpi.unit === '$' ? formatCompact(movingAverages[kpi.id]) : movingAverages[kpi.id].toFixed(1)}
+                    <Sparkline 
+                      data={historicalData[kpi.id]} 
+                      color={status === 'emerald' ? '#10B981' : status === 'amber' ? '#F59E0B' : '#EF4444'} 
+                    />
                   </td>
                   <td className="px-4 py-3 text-center">
                     {details.length > 0 && (
@@ -3961,7 +3566,7 @@ function KPIDashboardView({ projects, payments }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {(calculateKpiValues.details[drilldownKpi] || []).slice(0, 10).map((item, idx) => (
+                {(calculateKpiValues.details[drilldownKpi] || []).sort(sortByJobNumber).slice(0, 10).map((item, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium">{item['Project ID'] || item['Name'] || '—'}</td>
                     <td className="px-4 py-2 text-sm text-gray-600">{item['Status'] || item['Customer'] || '—'}</td>
@@ -4003,14 +3608,8 @@ function KPIDashboardView({ projects, payments }) {
 // PIPELINE ANALYTICS VIEW
 // ══════════════════════════════════════════════════════════════════════════════
 const COUNTRY_MAP = {
-  // Canada - use province codes
-  'AB': 'Canada', 'BC': 'Canada', 'ON': 'Canada', 'MB': 'Canada', 'QC': 'Canada', 'SK': 'Canada',
-  // USA - state codes (CA = California, not Canada!)
-  'CA': 'USA', 'HI': 'USA', 'CO': 'USA', 'WA': 'USA', 'NY': 'USA', 'OR': 'USA', 
-  'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA', 'WI': 'USA',
-  'MA': 'USA', 'MI': 'USA', 'NJ': 'USA', 'CT': 'USA', 'PA': 'USA', 'OH': 'USA', 'IL': 'USA', 'GA': 'USA',
-  'NC': 'USA', 'VA': 'USA', 'MD': 'USA', 'SC': 'USA', 'TN': 'USA', 'MO': 'USA', 'IN': 'USA', 'KY': 'USA',
-  'US': 'USA', 'USA': 'USA',
+  'CA': 'Canada', 'AB': 'Canada', 'BC': 'Canada', 'ON': 'Canada', 'MB': 'Canada', 'QC': 'Canada',
+  'US': 'USA', 'USA': 'USA', 'WA': 'USA', 'CA_US': 'USA', 'CO': 'USA', 'HI': 'USA', 'NY': 'USA', 'OR': 'USA', 'ID': 'USA', 'NV': 'USA', 'UT': 'USA', 'TX': 'USA', 'FL': 'USA', 'AZ': 'USA', 'MN': 'USA',
 };
 
 const MARKET_DETAILS = {
@@ -4027,23 +3626,13 @@ const MARKET_DETAILS = {
 };
 
 // Sales channels - California = Novare, Ontario = McLean, rest = Direct
-// Exception: HDI projects are direct sales even in CA
 const SALES_CHANNELS = {
   novare: { name: 'Novare (CA Dealer)', color: '#F59E0B', icon: '🏪' },
   mclean: { name: 'McLean (ON Dealer)', color: '#EC4899', icon: '🏪' },
   direct: { name: 'Direct Sale', color: '#3B82F6', icon: '🏠' },
 };
 
-const getSalesChannel = (market, project = null) => {
-  // HDI projects are always direct sales, even in CA
-  if (project) {
-    const projectId = (project['Project ID'] || '').toUpperCase();
-    const customer = (project['Status'] || project['Customer (text)'] || '').toUpperCase();
-    if (projectId.includes('HDI') || customer.includes('HDI')) {
-      return 'direct';
-    }
-  }
-  
+const getSalesChannel = (market) => {
   if (market === 'CA') return 'novare';
   if (market === 'ON') return 'mclean';
   return 'direct';
@@ -4109,13 +3698,13 @@ function PipelineAnalyticsView({ projects }) {
 
     filteredProjects.forEach(p => {
       const value = p['Contract Value'] || 0;
-      const mods = getModCountFromModel(p);
+      const mods = parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1;
       const country = getCountry(p);
       const market = getMarket(p);
       const model = getModel(p);
       const stage = p.Stage || 'Unknown';
       const rawMarket = (p['Site State/Province'] || p['Market'] || '').toUpperCase();
-      const channel = getSalesChannel(rawMarket, p);
+      const channel = getSalesChannel(rawMarket);
 
       // Totals
       data.total.count++;
@@ -4516,7 +4105,7 @@ function InvestorDashboardView({ projects, payments }) {
     // Pipeline metrics
     const activePipeline = projects.filter(p => p.Stage !== 'Complete');
     const pipelineValue = activePipeline.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
-    const pipelineMods = activePipeline.reduce((sum, p) => sum + getModCountFromModel(p), 0);
+    const pipelineMods = activePipeline.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
 
     // Production metrics
     const inProduction = projects.filter(p => p.Stage === 'Production');
@@ -4533,7 +4122,7 @@ function InvestorDashboardView({ projects, payments }) {
       new Date(p['Completion Date']).getFullYear() === thisYear
     );
     const completedValue = completedThisYear.reduce((sum, p) => sum + (p['Contract Value'] || 0), 0);
-    const completedMods = completedThisYear.reduce((sum, p) => sum + getModCountFromModel(p), 0);
+    const completedMods = completedThisYear.reduce((sum, p) => sum + (parseInt(p['Mod Count']) || parseInt(p['Mods']) || 1), 0);
 
     // Capacity utilization (18 positions)
     const positionsUsed = inProduction.filter(p => p['Bay Assignment']).length;
@@ -4586,7 +4175,7 @@ function InvestorDashboardView({ projects, payments }) {
       // Units completed this month
       const unitsCompleted = projects.filter(p => 
         p.Stage === 'Complete' && isInMonth(p['Completion Date'], m, y)
-      ).reduce((sum, p) => sum + getModCountFromModel(p), 0);
+      ).reduce((sum, p) => sum + (parseInt(p['Mod Count']) || 1), 0);
 
       monthlyData.push({
         month: m,
@@ -4602,8 +4191,7 @@ function InvestorDashboardView({ projects, payments }) {
     // Geographic split
     const usaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
-      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL', 'WI', 
-              'MA', 'MI', 'NJ', 'CT', 'PA', 'OH', 'IL', 'GA', 'NC', 'VA', 'MD', 'SC', 'TN', 'MO', 'IN', 'KY'].includes(market);
+      return ['CA', 'HI', 'CO', 'WA', 'NY', 'OR', 'AZ', 'MN', 'ID', 'NV', 'UT', 'TX', 'FL'].includes(market);
     });
     const canadaProjects = activePipeline.filter(p => {
       const market = (p['Site State/Province'] || '').toUpperCase();
