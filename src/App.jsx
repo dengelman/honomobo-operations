@@ -275,6 +275,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'MFG Week': project?.['MFG Week'] || '',
     'MFG Status': project?.['MFG Status'] || '',
     'Project Manager': project?.['Project Manager'] || '',
+    'Model': project?.['Model'] || '',
   });
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -283,6 +284,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const positions = ['', ...POSITION_IDS];
   const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
   const pms = ['', 'Ryan Sieben', 'Will Colford', 'Nash Thornton', 'Jarod Kawalle'];
+  const models = ['', 'HO1', 'HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1', 'Custom'];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -335,15 +337,23 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Model / Unit Type</label>
+              <select value={form['Model']} onChange={e => setForm({ ...form, 'Model': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                {models.map(m => <option key={m} value={m}>{m || '— Select Model —'}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
               <label className="block text-sm font-medium mb-1">Project Manager</label>
               <select value={form['Project Manager']} onChange={e => setForm({ ...form, 'Project Manager': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
                 {pms.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
               </select>
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Contract Value ($)</label>
-            <input type="number" value={form['Contract Value']} onChange={e => setForm({ ...form, 'Contract Value': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" />
+            <div>
+              <label className="block text-sm font-medium mb-1">Contract Value ($)</label>
+              <input type="number" value={form['Contract Value']} onChange={e => setForm({ ...form, 'Contract Value': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" />
+            </div>
           </div>
           {(form['Stage'] === 'Production' || form['Stage'] === 'Logistics') && (
             <>
@@ -4219,6 +4229,10 @@ export default function App() {
       // Project Manager - don't send if empty (could be linked record field)
       if (hasValue(formData['Project Manager'])) {
         cleanedData['Project Manager'] = formData['Project Manager'];
+      }
+      // Model / Unit Type
+      if (hasValue(formData['Model'])) {
+        cleanedData['Model'] = formData['Model'];
       }
       
       // Handle numeric fields - convert and only include if valid
