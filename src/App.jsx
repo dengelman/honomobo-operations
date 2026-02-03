@@ -3064,7 +3064,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
 
                 {/* Model */}
                 <div className="col-span-1">
-                  <span className="text-sm font-medium">{project['Model'] || '—'}</span>
+                  <span className="text-sm font-medium">{project['Model'] || project['Unit Type'] || '—'}</span>
                   <span className="text-xs text-gray-400 ml-1">({getModCountFromModel(project)} mods)</span>
                 </div>
 
