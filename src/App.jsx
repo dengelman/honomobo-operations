@@ -1,7 +1,7 @@
 // Honomobo Operations - Full Integrated Platform
 // UPDATED: All views now use real Airtable data
 import React, { useState, useEffect, useMemo } from 'react';
-import { LayoutDashboard, ClipboardList, DollarSign, AlertTriangle, Menu, X, Plus, RefreshCw, Edit2, Trash2, Calendar, MapPin, Clock, CheckCircle, AlertCircle, FileText, Eye, Shield, ChevronDown, ChevronRight, Upload, Search, Check, History, Home, ChevronLeft, Truck, Ship, GripVertical, Zap, Users, Package, Settings, RotateCcw, Download, Filter, CheckCircle2, Factory, TrendingUp, TrendingDown, Building2, Circle, MoreHorizontal, MessageSquare, ExternalLink, ArrowRight, ArrowLeft, Folder, User, Wrench, ClipboardCheck, Camera, Flag, BarChart3, CreditCard, Pencil, Info, PieChart, Calculator, Loader2, Lock, Pen, PackageCheck, Phone, Mail } from 'lucide-react';
+import { LayoutDashboard, ClipboardList, DollarSign, AlertTriangle, Menu, X, Plus, RefreshCw, Edit2, Trash2, Calendar, MapPin, Clock, CheckCircle, AlertCircle, FileText, Eye, Shield, ChevronDown, ChevronRight, ChevronUp, Upload, Search, Check, History, Home, ChevronLeft, Truck, Ship, GripVertical, Zap, Users, Package, Settings, RotateCcw, Download, Filter, CheckCircle2, Factory, TrendingUp, TrendingDown, Building2, Circle, MoreHorizontal, MessageSquare, ExternalLink, ArrowRight, ArrowLeft, Folder, User, Wrench, ClipboardCheck, Camera, Flag, BarChart3, CreditCard, Pencil, Info, PieChart, Calculator, Loader2, Lock, Pen, PackageCheck, Phone, Mail, ListOrdered } from 'lucide-react';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AIRTABLE CONFIGURATION & API
@@ -94,6 +94,27 @@ const airtableAPI = {
       results.push(...(data.records || []).map(r => ({ id: r.id, ...r.fields })));
     }
     return results;
+  },
+  async updateProductionOrder(updates) {
+    // updates is array of { id, order }
+    // Batch update in groups of 10
+    const batches = [];
+    for (let i = 0; i < updates.length; i += 10) {
+      batches.push(updates.slice(i, i + 10));
+    }
+    for (const batch of batches) {
+      const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          records: batch.map(u => ({
+            id: u.id,
+            fields: { 'Production Order': u.order }
+          }))
+        })
+      });
+      if (!res.ok) throw new Error('Failed to update production order');
+    }
   }
 };
 
@@ -2833,6 +2854,278 @@ function CustomerPortalView({ projects, documents, payments }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION QUEUE VIEW - Drag & Drop Build Order
+// ══════════════════════════════════════════════════════════════════════════════
+function ProductionQueueView({ projects, onUpdateOrder }) {
+  // Filter to only production-stage projects
+  const productionProjects = useMemo(() => {
+    return projects
+      .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics')
+      .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
+  }, [projects]);
+
+  const [queue, setQueue] = useState(productionProjects);
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState('all'); // all, fab, framing, drywall, etc.
+
+  // Update queue when projects change
+  useEffect(() => {
+    setQueue(productionProjects);
+  }, [productionProjects]);
+
+  const handleDragStart = (e, index) => {
+    setDraggedItem(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target.outerHTML);
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    if (draggedItem === null) return;
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e, dropIndex) => {
+    e.preventDefault();
+    if (draggedItem === null || draggedItem === dropIndex) {
+      setDraggedItem(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const newQueue = [...queue];
+    const [removed] = newQueue.splice(draggedItem, 1);
+    newQueue.splice(dropIndex, 0, removed);
+    
+    setQueue(newQueue);
+    setDraggedItem(null);
+    setDragOverIndex(null);
+    setHasChanges(true);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverIndex(null);
+  };
+
+  const handleSaveOrder = async () => {
+    setSaving(true);
+    try {
+      // Create updates array with new order numbers
+      const updates = queue.map((project, index) => ({
+        id: project.id,
+        order: index + 1
+      }));
+      
+      await onUpdateOrder(updates);
+      setHasChanges(false);
+    } catch (err) {
+      console.error('Failed to save order:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const moveItem = (fromIndex, direction) => {
+    const toIndex = fromIndex + direction;
+    if (toIndex < 0 || toIndex >= queue.length) return;
+    
+    const newQueue = [...queue];
+    const [removed] = newQueue.splice(fromIndex, 1);
+    newQueue.splice(toIndex, 0, removed);
+    setQueue(newQueue);
+    setHasChanges(true);
+  };
+
+  const getStageColor = (mfgStatus) => {
+    const status = (mfgStatus || '').toLowerCase();
+    if (status.includes('fab')) return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-300' };
+    if (status.includes('fram')) return { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-300' };
+    if (status.includes('rough') || status.includes('mech')) return { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-300' };
+    if (status.includes('drywall')) return { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-300' };
+    if (status.includes('final') || status.includes('qc')) return { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-300' };
+    if (status.includes('ready') || status.includes('ship')) return { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-300' };
+    return { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-300' };
+  };
+
+  const filteredQueue = filter === 'all' 
+    ? queue 
+    : queue.filter(p => {
+        const status = (p['Mfg Status'] || '').toLowerCase();
+        if (filter === 'fab') return status.includes('fab');
+        if (filter === 'framing') return status.includes('fram');
+        if (filter === 'roughin') return status.includes('rough') || status.includes('mech');
+        if (filter === 'drywall') return status.includes('drywall');
+        if (filter === 'final') return status.includes('final') || status.includes('qc');
+        if (filter === 'ready') return status.includes('ready') || status.includes('ship');
+        return true;
+      });
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Production Queue</h2>
+          <p className="text-sm text-gray-500">Drag and drop to set build order • {queue.length} units in production</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="all">All Stages</option>
+            <option value="fab">Fabrication</option>
+            <option value="framing">Framing</option>
+            <option value="roughin">Rough-In</option>
+            <option value="drywall">Drywall</option>
+            <option value="final">Final QC</option>
+            <option value="ready">Ready to Ship</option>
+          </select>
+          {hasChanges && (
+            <button
+              onClick={handleSaveOrder}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              Save Order
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Unsaved Changes Warning */}
+      {hasChanges && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
+          <AlertCircle className="w-5 h-5 text-amber-500" />
+          <span className="text-sm text-amber-800">You have unsaved changes. Click "Save Order" to update Airtable.</span>
+        </div>
+      )}
+
+      {/* Queue List */}
+      <div className="bg-white rounded-xl border overflow-hidden">
+        <div className="bg-gray-50 px-4 py-3 border-b grid grid-cols-12 gap-4 text-xs font-semibold text-gray-500 uppercase">
+          <div className="col-span-1">#</div>
+          <div className="col-span-2">Project</div>
+          <div className="col-span-2">Customer</div>
+          <div className="col-span-1">Model</div>
+          <div className="col-span-2">Mfg Status</div>
+          <div className="col-span-2">Bay</div>
+          <div className="col-span-2 text-right">Actions</div>
+        </div>
+
+        <div className="divide-y">
+          {filteredQueue.map((project, index) => {
+            const stageColors = getStageColor(project['Mfg Status']);
+            const isDragging = draggedItem === index;
+            const isDragOver = dragOverIndex === index;
+
+            return (
+              <div
+                key={project.id}
+                draggable
+                onDragStart={e => handleDragStart(e, index)}
+                onDragOver={e => handleDragOver(e, index)}
+                onDragLeave={handleDragLeave}
+                onDrop={e => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                className={`
+                  grid grid-cols-12 gap-4 px-4 py-3 items-center cursor-grab active:cursor-grabbing
+                  transition-all duration-150
+                  ${isDragging ? 'opacity-50 bg-blue-50' : ''}
+                  ${isDragOver ? 'border-t-2 border-blue-500 bg-blue-50' : ''}
+                  ${!isDragging && !isDragOver ? 'hover:bg-gray-50' : ''}
+                `}
+              >
+                {/* Order Number */}
+                <div className="col-span-1 flex items-center gap-2">
+                  <GripVertical className="w-4 h-4 text-gray-400" />
+                  <span className="font-bold text-gray-400">{index + 1}</span>
+                </div>
+
+                {/* Project ID */}
+                <div className="col-span-2">
+                  <span className="font-semibold text-gray-900">{project['Project ID']}</span>
+                </div>
+
+                {/* Customer */}
+                <div className="col-span-2 text-sm text-gray-600 truncate">
+                  {project['Status'] || project['Customer (text)'] || '—'}
+                </div>
+
+                {/* Model */}
+                <div className="col-span-1">
+                  <span className="text-sm font-medium">{project['Model'] || '—'}</span>
+                  <span className="text-xs text-gray-400 ml-1">({getModCountFromModel(project)} mods)</span>
+                </div>
+
+                {/* Mfg Status */}
+                <div className="col-span-2">
+                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
+                    {project['Mfg Status'] || 'Not Started'}
+                  </span>
+                </div>
+
+                {/* Bay */}
+                <div className="col-span-2 text-sm text-gray-600">
+                  {project['Position'] || project['Bay'] || '—'}
+                </div>
+
+                {/* Actions */}
+                <div className="col-span-2 flex items-center justify-end gap-1">
+                  <button
+                    onClick={() => moveItem(index, -1)}
+                    disabled={index === 0}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
+                    title="Move up"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => moveItem(index, 1)}
+                    disabled={index === filteredQueue.length - 1}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
+                    title="Move down"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {filteredQueue.length === 0 && (
+          <div className="p-8 text-center text-gray-500">
+            No projects in production queue
+          </div>
+        )}
+      </div>
+
+      {/* Help Text */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <h4 className="font-semibold text-blue-900 mb-2">How to use</h4>
+        <ul className="text-sm text-blue-800 space-y-1">
+          <li>• <strong>Drag & drop</strong> rows to reorder the build sequence</li>
+          <li>• Use the <strong>arrow buttons</strong> for fine adjustments</li>
+          <li>• Click <strong>Save Order</strong> to update Airtable</li>
+          <li>• All other views will use this order for production planning</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP COMPONENT
 // ══════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2855,6 +3148,7 @@ const allNavItems = [
   { id: 'kpi', label: 'KPI Scorecard', icon: BarChart3 },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
   { id: 'jobs', label: 'Job Schedule', icon: Calendar },
+  { id: 'queue', label: 'Production Queue', icon: ListOrdered },
   { id: 'scheduler', label: 'Production Scheduler', icon: Factory },
   { id: 'board', label: 'Production Board', icon: Package },
   { id: 'floor', label: 'Mfg Floor', icon: Wrench },
@@ -2868,10 +3162,10 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'jobs', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'jobs', 'queue', 'scheduler', 'board', 'floor', 'budget', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
   de_manager: ['dashboard', 'pipeline', 'kpi', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'jobs', 'scheduler', 'drawings', 'projectbudget', 'portal'],
-  factory: ['floor', 'board', 'scheduler'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
+  factory: ['floor', 'board', 'queue', 'scheduler'],
   qc: ['floor', 'board', 'drawings'],
   finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'budget', 'projectbudget', 'pl', 'sage', 'deviations'],
   customer: ['portal'],
@@ -3021,6 +3315,15 @@ export default function App() {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, ...updated } : p));
   };
 
+  const handleUpdateProductionOrder = async (updates) => {
+    await airtableAPI.updateProductionOrder(updates);
+    // Update local state with new order
+    setProjects(prev => prev.map(p => {
+      const update = updates.find(u => u.id === p.id);
+      return update ? { ...p, 'Production Order': update.order } : p;
+    }));
+  };
+
   const handleEdit = (project) => { setEditingProject(project); setShowForm(true); };
 
   const renderView = () => {
@@ -3031,6 +3334,7 @@ export default function App() {
       case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
       case 'wip': return <WIPScheduleView projects={projects} onUpdateWip={handleUpdateWip} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
+      case 'queue': return <ProductionQueueView projects={projects} onUpdateOrder={handleUpdateProductionOrder} />;
       case 'scheduler': return <ProductionSchedulerView projects={projects} />;
       case 'board': return <ProductionBoardView projects={projects} onEdit={handleEdit} />;
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
