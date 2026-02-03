@@ -982,44 +982,98 @@ function ManufacturingFloorView({ projects, onEdit }) {
     [productionProjects]
   );
 
-  const getPositionProject = (positionId) => {
-    return productionProjects.find(p => {
+  // Get ALL projects in a position (supports multiple)
+  const getPositionProjects = (positionId) => {
+    return productionProjects.filter(p => {
       const assignment = p['Bay Assignment'] || '';
       return assignment === positionId || assignment.toUpperCase() === positionId;
     });
   };
 
-  const occupiedIndoor = INDOOR_POSITIONS.filter(p => getPositionProject(p)).length;
-  const occupiedOutdoor = OUTDOOR_POSITIONS.filter(p => getPositionProject(p)).length;
+  // Legacy single project getter (for compatibility)
+  const getPositionProject = (positionId) => {
+    const projects = getPositionProjects(positionId);
+    return projects.length > 0 ? projects[0] : null;
+  };
+
+  const occupiedIndoor = INDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
+  const occupiedOutdoor = OUTDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
   const unassigned = productionProjects.filter(p => !p['Bay Assignment']).length;
   const waitingCount = productionProjects.filter(p => p['Bay Assignment'] === 'WFB').length;
 
+  // State for expanded position (to select which project to edit)
+  const [expandedPosition, setExpandedPosition] = useState(null);
+
   const PositionCard = ({ positionId, size = 'normal' }) => {
     const position = PLANT_POSITIONS[positionId];
-    const project = getPositionProject(positionId);
+    const projects = getPositionProjects(positionId);
     const isSmall = size === 'small';
+    const hasMultiple = projects.length > 1;
+    const isExpanded = expandedPosition === positionId;
+
+    const handleClick = () => {
+      if (projects.length === 0) return;
+      if (projects.length === 1) {
+        onEdit(projects[0]);
+      } else {
+        setExpandedPosition(isExpanded ? null : positionId);
+      }
+    };
 
     return (
       <div
-        className={`rounded-lg border-2 transition-all ${project ? 'cursor-pointer hover:shadow-lg' : ''} ${isSmall ? 'p-2' : 'p-3'}`}
-        style={{ borderColor: project ? position.color : '#E5E7EB', backgroundColor: project ? `${position.color}10` : '#FAFAFA' }}
-        onClick={() => project && onEdit(project)}
+        className={`rounded-lg border-2 transition-all ${projects.length > 0 ? 'cursor-pointer hover:shadow-lg' : ''} ${isSmall ? 'p-2' : 'p-3'} ${hasMultiple ? 'ring-2 ring-offset-1' : ''}`}
+        style={{ 
+          borderColor: projects.length > 0 ? position.color : '#E5E7EB', 
+          backgroundColor: projects.length > 0 ? `${position.color}10` : '#FAFAFA',
+          ringColor: hasMultiple ? position.color : 'transparent'
+        }}
+        onClick={handleClick}
       >
         <div className="flex items-center justify-between mb-1">
           <span className={`font-bold ${isSmall ? 'text-xs' : 'text-sm'}`} style={{ color: position.color }}>{positionId}</span>
-          <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{position.zone}</span>
+          <div className="flex items-center gap-1">
+            {hasMultiple && (
+              <span className="px-1.5 py-0.5 bg-blue-500 text-white text-[10px] rounded-full font-bold">{projects.length}</span>
+            )}
+            <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{position.zone}</span>
+          </div>
         </div>
-        {project ? (
+        {projects.length > 0 ? (
           <div className={isSmall ? 'space-y-0.5' : 'space-y-1'}>
-            <div className={`font-semibold text-gray-900 ${isSmall ? 'text-xs' : 'text-sm'}`}>{project['Project ID']}</div>
-            <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{project['Status'] || ''}</div>
-            <div className="flex items-center justify-between">
-              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{project['Model'] || '—'}</span>
-              {project['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{project['MFG Week']}</span>}
+            {/* Show first project */}
+            <div className={`font-semibold text-gray-900 ${isSmall ? 'text-xs' : 'text-sm'}`}>
+              {projects[0]['Project ID']}
+              {hasMultiple && !isSmall && <span className="text-gray-400 font-normal"> +{projects.length - 1}</span>}
             </div>
-            {!isSmall && project['MFG Week'] && (
+            <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Status'] || ''}</div>
+            <div className="flex items-center justify-between">
+              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Model'] || '—'}</span>
+              {projects[0]['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{projects[0]['MFG Week']}</span>}
+            </div>
+            {!isSmall && projects[0]['MFG Week'] && (
               <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(parseInt(project['MFG Week']) / 12) * 100}%`, backgroundColor: position.color }} />
+                <div className="h-full rounded-full" style={{ width: `${(parseInt(projects[0]['MFG Week']) / 12) * 100}%`, backgroundColor: position.color }} />
+              </div>
+            )}
+            
+            {/* Expanded view showing all projects */}
+            {isExpanded && hasMultiple && !isSmall && (
+              <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                <div className="text-xs text-gray-500 font-medium">All projects in {positionId}:</div>
+                {projects.map((p, idx) => (
+                  <div 
+                    key={p.id} 
+                    className="p-2 bg-white rounded border hover:bg-gray-50 cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); onEdit(p); }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-sm">{p['Project ID']}</span>
+                      <span className="text-xs text-gray-400">{p['Model'] || '—'}</span>
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
