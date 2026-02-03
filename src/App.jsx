@@ -1363,6 +1363,550 @@ const PROD_STAGES = [
 // ProductionBoardView merged into ManufacturingFloorView - use 'Kanban Board' tab
 
 // ══════════════════════════════════════════════════════════════════════════════
+// CAPACITY PLANNING VIEW - Forward Load & Bottleneck Prediction
+// ══════════════════════════════════════════════════════════════════════════════
+function CapacityPlanningView({ projects }) {
+  const [viewMode, setViewMode] = useState('timeline'); // timeline, capacity, forecast
+  
+  // Constants
+  const TOTAL_BUILD_SPOTS = 9; // Bays 1-3 (excluding fab bays)
+  const TOTAL_FAB_SPOTS = 3;   // Bay 4 (4N, 4C, 4S)
+  const TOTAL_OUTDOOR = 6;
+  const AVG_BUILD_WEEKS = 12;
+  const AVG_FAB_WEEKS = 4;
+  const WEEKLY_CAPACITY = 0.75; // 75% efficiency factor
+  
+  // Generate next 6 months
+  const months = useMemo(() => {
+    const result = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      result.push({
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        month: d.getMonth(),
+        year: d.getFullYear()
+      });
+    }
+    return result;
+  }, []);
+
+  // Categorize projects by stage and estimate when they'll hit production
+  const projectAnalysis = useMemo(() => {
+    const now = new Date();
+    
+    // Stage durations (average weeks)
+    const stageDurations = {
+      'Assessment': 4,
+      'Concept': 8,
+      'D&E': 12,
+      'Permitting': 16, // highly variable
+    };
+    
+    const analysis = projects.map(p => {
+      const stage = p.Stage;
+      const contractValue = p['Contract Value'] || 0;
+      const model = p['Model'] || 'Unknown';
+      
+      // Estimate modules based on model
+      let modules = 1;
+      const modelMatch = model.match(/HO(\d)/);
+      if (modelMatch) modules = parseInt(modelMatch[1]) || 1;
+      
+      // Calculate estimated production start
+      let weeksToProduction = 0;
+      if (stage === 'Assessment') weeksToProduction = stageDurations.Assessment + stageDurations.Concept + stageDurations['D&E'] + stageDurations.Permitting;
+      else if (stage === 'Concept') weeksToProduction = stageDurations.Concept + stageDurations['D&E'] + stageDurations.Permitting;
+      else if (stage === 'D&E') weeksToProduction = stageDurations['D&E'] + stageDurations.Permitting;
+      else if (stage === 'Permitting') weeksToProduction = stageDurations.Permitting / 2; // assume halfway through
+      else if (stage === 'Production' || stage === 'Logistics') weeksToProduction = 0;
+      
+      // Use actual permit date if available
+      const permitDate = p['Permit Date'] ? new Date(p['Permit Date']) : null;
+      const productionStartDate = p['Production Start'] ? new Date(p['Production Start']) : null;
+      
+      let estProductionStart;
+      if (productionStartDate) {
+        estProductionStart = productionStartDate;
+      } else if (permitDate && stage === 'Permitting') {
+        estProductionStart = permitDate;
+      } else {
+        estProductionStart = new Date(now);
+        estProductionStart.setDate(estProductionStart.getDate() + (weeksToProduction * 7));
+      }
+      
+      // Calculate which month it falls into
+      const prodMonth = `${estProductionStart.getFullYear()}-${String(estProductionStart.getMonth() + 1).padStart(2, '0')}`;
+      
+      return {
+        ...p,
+        modules,
+        weeksToProduction,
+        estProductionStart,
+        prodMonth,
+        isInProduction: stage === 'Production' || stage === 'Logistics',
+        isUpcoming: ['Assessment', 'Concept', 'D&E', 'Permitting'].includes(stage)
+      };
+    });
+    
+    return analysis;
+  }, [projects]);
+
+  // Current production stats
+  const currentStats = useMemo(() => {
+    const inProduction = projectAnalysis.filter(p => p.isInProduction);
+    const inFab = inProduction.filter(p => {
+      const bay = p['Bay Assignment'] || '';
+      return bay.startsWith('4');
+    });
+    const inBuild = inProduction.filter(p => {
+      const bay = p['Bay Assignment'] || '';
+      return bay && !bay.startsWith('4') && !bay.startsWith('O') && bay !== 'WFB';
+    });
+    const inOutdoor = inProduction.filter(p => {
+      const bay = p['Bay Assignment'] || '';
+      return bay.startsWith('O');
+    });
+    const waitingForSpot = inProduction.filter(p => p['Bay Assignment'] === 'WFB');
+    const unassigned = inProduction.filter(p => !p['Bay Assignment']);
+    
+    return {
+      total: inProduction.length,
+      inFab: inFab.length,
+      inBuild: inBuild.length,
+      inOutdoor: inOutdoor.length,
+      waitingForSpot: waitingForSpot.length,
+      unassigned: unassigned.length,
+      fabUtilization: (inFab.length / TOTAL_FAB_SPOTS) * 100,
+      buildUtilization: (inBuild.length / TOTAL_BUILD_SPOTS) * 100,
+      totalModules: inProduction.reduce((s, p) => s + p.modules, 0)
+    };
+  }, [projectAnalysis]);
+
+  // Forward load by month
+  const forwardLoad = useMemo(() => {
+    const load = {};
+    months.forEach(m => {
+      load[m.key] = {
+        entering: [],
+        inProgress: [],
+        exiting: [],
+        totalModules: 0
+      };
+    });
+    
+    projectAnalysis.forEach(p => {
+      if (p.prodMonth && load[p.prodMonth]) {
+        load[p.prodMonth].entering.push(p);
+        load[p.prodMonth].totalModules += p.modules;
+      }
+    });
+    
+    // Calculate cumulative in-progress
+    let carryover = projectAnalysis.filter(p => p.isInProduction).length;
+    months.forEach(m => {
+      const entering = load[m.key].entering.length;
+      const exiting = Math.floor(entering * 0.8); // Assume 80% throughput
+      load[m.key].inProgress = carryover + entering;
+      load[m.key].exiting = exiting;
+      carryover = carryover + entering - exiting;
+    });
+    
+    return load;
+  }, [projectAnalysis, months]);
+
+  // Bottleneck prediction
+  const bottlenecks = useMemo(() => {
+    const issues = [];
+    
+    // Current bottleneck: WFB queue
+    if (currentStats.waitingForSpot > 0) {
+      issues.push({
+        severity: 'high',
+        type: 'current',
+        message: `${currentStats.waitingForSpot} module(s) waiting for build spot`,
+        detail: 'Fab output exceeding build capacity'
+      });
+    }
+    
+    // Build capacity warning
+    if (currentStats.buildUtilization > 80) {
+      issues.push({
+        severity: currentStats.buildUtilization > 90 ? 'high' : 'medium',
+        type: 'current',
+        message: `Build bays at ${currentStats.buildUtilization.toFixed(0)}% capacity`,
+        detail: `${TOTAL_BUILD_SPOTS - currentStats.inBuild} spots available`
+      });
+    }
+    
+    // Forward load warnings
+    months.forEach(m => {
+      const monthLoad = forwardLoad[m.key];
+      if (monthLoad.entering.length > 4) {
+        issues.push({
+          severity: monthLoad.entering.length > 6 ? 'high' : 'medium',
+          type: 'forecast',
+          message: `${monthLoad.entering.length} projects entering production in ${m.label}`,
+          detail: 'May exceed capacity - consider adjusting schedules'
+        });
+      }
+    });
+    
+    // Permitting backlog
+    const inPermitting = projectAnalysis.filter(p => p.Stage === 'Permitting').length;
+    if (inPermitting > 10) {
+      issues.push({
+        severity: 'medium',
+        type: 'pipeline',
+        message: `${inPermitting} projects in permitting`,
+        detail: 'Large wave may hit production simultaneously'
+      });
+    }
+    
+    return issues;
+  }, [currentStats, forwardLoad, months, projectAnalysis]);
+
+  // Revenue forecast based on forward load
+  const revenueForecast = useMemo(() => {
+    return months.map(m => {
+      const monthProjects = forwardLoad[m.key].entering;
+      const revenue = monthProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+      const avgPerProject = monthProjects.length > 0 ? revenue / monthProjects.length : 0;
+      return {
+        ...m,
+        projects: monthProjects.length,
+        modules: forwardLoad[m.key].totalModules,
+        revenue,
+        avgPerProject
+      };
+    });
+  }, [forwardLoad, months]);
+
+  // Pipeline by stage
+  const pipelineByStage = useMemo(() => {
+    const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics'];
+    return stages.map(stage => {
+      const stageProjects = projectAnalysis.filter(p => p.Stage === stage);
+      return {
+        stage,
+        count: stageProjects.length,
+        modules: stageProjects.reduce((s, p) => s + p.modules, 0),
+        value: stageProjects.reduce((s, p) => s + (p['Contract Value'] || 0), 0)
+      };
+    });
+  }, [projectAnalysis]);
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Capacity Planning</h2>
+          <p className="text-sm text-gray-500">Forward load forecasting & bottleneck prediction • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
+        </div>
+        <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+          <button onClick={() => setViewMode('timeline')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'timeline' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            Timeline
+          </button>
+          <button onClick={() => setViewMode('capacity')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'capacity' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            Capacity
+          </button>
+          <button onClick={() => setViewMode('forecast')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'forecast' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            Forecast
+          </button>
+        </div>
+      </div>
+
+      {/* Bottleneck Alerts */}
+      {bottlenecks.length > 0 && (
+        <div className="space-y-2">
+          {bottlenecks.filter(b => b.severity === 'high').map((b, i) => (
+            <div key={i} className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-red-800">{b.message}</div>
+                <div className="text-sm text-red-600">{b.detail}</div>
+              </div>
+            </div>
+          ))}
+          {bottlenecks.filter(b => b.severity === 'medium').map((b, i) => (
+            <div key={i} className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
+              <div>
+                <div className="font-medium text-amber-800">{b.message}</div>
+                <div className="text-sm text-amber-600">{b.detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Current Capacity Stats */}
+      <div className="grid grid-cols-6 gap-4">
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">In Production</div>
+          <div className="text-3xl font-bold">{currentStats.total}</div>
+          <div className="text-xs text-gray-400">{currentStats.totalModules} modules</div>
+        </div>
+        <div className={`rounded-xl border p-4 ${currentStats.fabUtilization > 80 ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+          <div className="text-sm text-gray-500 mb-1">Fab Bays</div>
+          <div className="text-3xl font-bold">{currentStats.inFab}<span className="text-lg text-gray-400">/{TOTAL_FAB_SPOTS}</span></div>
+          <div className="h-2 bg-gray-200 rounded-full mt-2">
+            <div className={`h-full rounded-full ${currentStats.fabUtilization > 80 ? 'bg-amber-500' : 'bg-blue-500'}`} style={{ width: `${currentStats.fabUtilization}%` }} />
+          </div>
+        </div>
+        <div className={`rounded-xl border p-4 ${currentStats.buildUtilization > 80 ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+          <div className="text-sm text-gray-500 mb-1">Build Bays</div>
+          <div className="text-3xl font-bold">{currentStats.inBuild}<span className="text-lg text-gray-400">/{TOTAL_BUILD_SPOTS}</span></div>
+          <div className="h-2 bg-gray-200 rounded-full mt-2">
+            <div className={`h-full rounded-full ${currentStats.buildUtilization > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${currentStats.buildUtilization}%` }} />
+          </div>
+        </div>
+        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Outdoor</div>
+          <div className="text-3xl font-bold text-purple-600">{currentStats.inOutdoor}<span className="text-lg text-gray-400">/{TOTAL_OUTDOOR}</span></div>
+        </div>
+        <div className={`rounded-xl border p-4 ${currentStats.waitingForSpot > 0 ? 'bg-red-50 border-red-200' : 'bg-white'}`}>
+          <div className="text-sm text-gray-500 mb-1">Waiting for Spot</div>
+          <div className={`text-3xl font-bold ${currentStats.waitingForSpot > 0 ? 'text-red-600' : 'text-gray-400'}`}>{currentStats.waitingForSpot}</div>
+          <div className="text-xs text-gray-400">WFB queue</div>
+        </div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Available</div>
+          <div className="text-3xl font-bold text-emerald-600">{TOTAL_BUILD_SPOTS + TOTAL_FAB_SPOTS - currentStats.inFab - currentStats.inBuild}</div>
+          <div className="text-xs text-gray-400">build + fab</div>
+        </div>
+      </div>
+
+      {/* Timeline View */}
+      {viewMode === 'timeline' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b font-semibold">Forward Load Timeline</div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-48">Month</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Entering Production</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Modules</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Est. In Progress</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Capacity Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {months.map((m, idx) => {
+                  const load = forwardLoad[m.key];
+                  const entering = load.entering.length;
+                  const inProgress = load.inProgress;
+                  const capacityPct = (inProgress / (TOTAL_BUILD_SPOTS + TOTAL_FAB_SPOTS)) * 100;
+                  const revenue = load.entering.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+                  
+                  return (
+                    <tr key={m.key} className={idx === 0 ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                      <td className="px-6 py-4">
+                        <div className="font-medium">{m.label}</div>
+                        {idx === 0 && <div className="text-xs text-blue-600">Current</div>}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${entering > 4 ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-800'}`}>
+                          {entering} projects
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center text-gray-600">{load.totalModules}</td>
+                      <td className="px-6 py-4 text-center font-medium">{inProgress}</td>
+                      <td className="px-6 py-4 text-right font-medium">${formatCompact(revenue)}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full ${capacityPct > 90 ? 'bg-red-500' : capacityPct > 70 ? 'bg-amber-500' : 'bg-emerald-500'}`} 
+                              style={{ width: `${Math.min(capacityPct, 100)}%` }} 
+                            />
+                          </div>
+                          <span className="text-xs text-gray-500 w-12">{capacityPct.toFixed(0)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Capacity View */}
+      {viewMode === 'capacity' && (
+        <div className="grid grid-cols-2 gap-6">
+          {/* Pipeline Funnel */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Pipeline to Production</div>
+            <div className="p-6 space-y-3">
+              {pipelineByStage.map((stage, idx) => {
+                const maxCount = Math.max(...pipelineByStage.map(s => s.count), 1);
+                const width = (stage.count / maxCount) * 100;
+                const colors = {
+                  'Assessment': '#94A3B8',
+                  'Concept': '#A855F7',
+                  'D&E': '#3B82F6',
+                  'Permitting': '#F59E0B',
+                  'Production': '#10B981',
+                  'Logistics': '#F97316'
+                };
+                
+                return (
+                  <div key={stage.stage} className="flex items-center gap-4">
+                    <div className="w-24 text-sm font-medium text-gray-700">{stage.stage}</div>
+                    <div className="flex-1 h-8 bg-gray-100 rounded-lg overflow-hidden">
+                      <div 
+                        className="h-full rounded-lg flex items-center px-3"
+                        style={{ width: `${width}%`, backgroundColor: colors[stage.stage] }}
+                      >
+                        <span className="text-white text-sm font-medium">{stage.count}</span>
+                      </div>
+                    </div>
+                    <div className="w-24 text-right text-sm text-gray-500">${formatCompact(stage.value)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Monthly Entering Production */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Entering Production by Month</div>
+            <div className="p-6 space-y-4">
+              {months.map(m => {
+                const load = forwardLoad[m.key];
+                const entering = load.entering;
+                
+                return (
+                  <div key={m.key}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">{m.label}</span>
+                      <span className={`text-sm ${entering.length > 4 ? 'text-amber-600 font-medium' : 'text-gray-500'}`}>
+                        {entering.length} projects
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {entering.slice(0, 8).map(p => (
+                        <span key={p.id} className="px-2 py-1 bg-gray-100 rounded text-xs font-medium">
+                          {p['Project ID']}
+                        </span>
+                      ))}
+                      {entering.length > 8 && (
+                        <span className="px-2 py-1 bg-gray-200 rounded text-xs text-gray-500">
+                          +{entering.length - 8} more
+                        </span>
+                      )}
+                      {entering.length === 0 && (
+                        <span className="text-xs text-gray-400">No projects scheduled</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Forecast View */}
+      {viewMode === 'forecast' && (
+        <div className="space-y-6">
+          {/* Revenue Forecast */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Revenue Forecast (Based on Production Schedule)</div>
+            <div className="p-6">
+              <div className="grid grid-cols-6 gap-4 mb-6">
+                {revenueForecast.map((m, idx) => (
+                  <div key={m.key} className={`p-4 rounded-lg ${idx === 0 ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
+                    <div className="text-sm text-gray-500">{m.label}</div>
+                    <div className="text-xl font-bold mt-1">${formatCompact(m.revenue)}</div>
+                    <div className="text-xs text-gray-400 mt-1">{m.projects} projects • {m.modules} modules</div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-4 border-t">
+                <div>
+                  <div className="text-sm text-gray-500">6-Month Total</div>
+                  <div className="text-2xl font-bold">${formatCompact(revenueForecast.reduce((s, m) => s + m.revenue, 0))}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Avg Monthly</div>
+                  <div className="text-2xl font-bold">${formatCompact(revenueForecast.reduce((s, m) => s + m.revenue, 0) / 6)}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Total Projects</div>
+                  <div className="text-2xl font-bold">{revenueForecast.reduce((s, m) => s + m.projects, 0)}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Total Modules</div>
+                  <div className="text-2xl font-bold">{revenueForecast.reduce((s, m) => s + m.modules, 0)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Scaling Targets */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Scaling Progress: 40 → 80 Homes/Year</div>
+            <div className="p-6">
+              <div className="grid grid-cols-3 gap-6">
+                <div>
+                  <div className="text-sm text-gray-500 mb-2">Current Annual Rate</div>
+                  <div className="text-4xl font-bold">{currentStats.total * 4}</div>
+                  <div className="text-sm text-gray-400">Based on current production × 4 quarters</div>
+                  <div className="mt-4 h-4 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${((currentStats.total * 4) / 80) * 100}%` }} />
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">{(((currentStats.total * 4) / 80) * 100).toFixed(0)}% of 80 target</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500 mb-2">Pipeline Coverage</div>
+                  <div className="text-4xl font-bold">{projectAnalysis.filter(p => p.isUpcoming).length}</div>
+                  <div className="text-sm text-gray-400">Projects in pre-production stages</div>
+                  <div className="mt-4 space-y-1">
+                    {['Permitting', 'D&E', 'Concept', 'Assessment'].map(stage => {
+                      const count = projectAnalysis.filter(p => p.Stage === stage).length;
+                      return (
+                        <div key={stage} className="flex items-center gap-2 text-xs">
+                          <span className="w-20 text-gray-500">{stage}</span>
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full">
+                            <div className="h-full bg-gray-400 rounded-full" style={{ width: `${(count / 20) * 100}%` }} />
+                          </div>
+                          <span className="w-6 text-right">{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500 mb-2">Capacity Headroom</div>
+                  <div className="text-4xl font-bold text-emerald-600">
+                    {TOTAL_BUILD_SPOTS + TOTAL_FAB_SPOTS - currentStats.inFab - currentStats.inBuild}
+                  </div>
+                  <div className="text-sm text-gray-400">Available build + fab spots</div>
+                  <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <div className="flex justify-between"><span>Max weekly throughput:</span><span className="font-medium">~1.5 modules</span></div>
+                      <div className="flex justify-between"><span>Annual capacity:</span><span className="font-medium">~78 modules</span></div>
+                      <div className="flex justify-between"><span>Utilization:</span><span className="font-medium">{currentStats.buildUtilization.toFixed(0)}%</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // FINANCIALS VIEW - Merged Budget Summary + P&L
 // ══════════════════════════════════════════════════════════════════════════════
 function FinancialsView({ projects }) {
@@ -3413,6 +3957,7 @@ const allNavItems = [
   { id: 'pipeline', label: 'Pipeline Analytics', icon: PieChart },
   { id: 'kpi', label: 'KPI Scorecard', icon: BarChart3 },
   { id: 'design', label: 'Design & Engineering', icon: Pencil },
+  { id: 'capacity', label: 'Capacity Planning', icon: Calendar },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
   { id: 'jobs', label: 'Job Schedule', icon: Calendar },
   { id: 'queue', label: 'Production Queue', icon: ListOrdered },
@@ -3427,12 +3972,12 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'capacity', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
   de_manager: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
-  factory: ['floor', 'queue', 'scheduler'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'capacity', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
+  factory: ['floor', 'queue', 'scheduler', 'capacity'],
   qc: ['floor', 'drawings'],
-  finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'wip', 'projectbudget', 'pl', 'sage', 'deviations'],
+  finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'capacity', 'wip', 'projectbudget', 'pl', 'sage', 'deviations'],
   customer: ['portal'],
 };
 
@@ -3664,6 +4209,7 @@ export default function App() {
       case 'pipeline': return <PipelineAnalyticsView projects={projects} />;
       case 'kpi': return <KPIDashboardView projects={projects} payments={payments} />;
       case 'design': return <DesignEngineeringView projects={projects} tasks={tasks} teamMembers={teamMembers} onUpdateTask={handleUpdateTask} onCreateTask={handleCreateTask} onRefresh={loadData} />;
+      case 'capacity': return <CapacityPlanningView projects={projects} />;
       case 'wip': return <WIPScheduleView projects={projects} onUpdateWip={handleUpdateWip} />;
       case 'jobs': return <JobScheduleView projects={projects} onEdit={handleEdit} />;
       case 'queue': return <ProductionQueueView projects={projects} onUpdateOrder={handleUpdateProductionOrder} />;
