@@ -842,7 +842,7 @@ function JobScheduleView({ projects, onEdit }) {
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredProjects = useMemo(() => {
-    let result = projects;
+    let result = projects.filter(p => p.Stage !== 'Complete'); // Only active projects
     if (filter !== 'all') {
       result = result.filter(p => p.Stage === filter);
     }
@@ -854,38 +854,47 @@ function JobScheduleView({ projects, onEdit }) {
         p['Customer (text)']?.toLowerCase().includes(term)
       );
     }
-    // Sort by Production Order
-    return result.sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
+    // Sort by job number ascending (extract number from Project ID)
+    return result.sort((a, b) => {
+      const getNum = (p) => {
+        const id = p['Project ID'] || '';
+        const match = id.match(/\d+/);
+        return match ? parseInt(match[0]) : 9999;
+      };
+      return getNum(a) - getNum(b);
+    });
   }, [projects, filter, searchTerm]);
+
+  const activeProjects = projects.filter(p => p.Stage !== 'Complete');
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg shadow p-6 flex justify-between">
           <div>
-            <p className="text-sm text-gray-500">Total Jobs</p>
-            <p className="text-2xl font-bold">{projects.length}</p>
+            <p className="text-sm text-gray-500">Active Projects</p>
+            <p className="text-2xl font-bold">{activeProjects.length}</p>
           </div>
           <Calendar className="w-10 h-10 text-blue-500" />
         </div>
         <div className="bg-white rounded-lg shadow p-6 flex justify-between">
           <div>
             <p className="text-sm text-gray-500">In Production</p>
-            <p className="text-2xl font-bold text-emerald-600">{projects.filter(p => p.Stage === 'Production').length}</p>
+            <p className="text-2xl font-bold text-emerald-600">{activeProjects.filter(p => p.Stage === 'Production').length}</p>
           </div>
           <Factory className="w-10 h-10 text-emerald-500" />
         </div>
         <div className="bg-white rounded-lg shadow p-6 flex justify-between">
           <div>
             <p className="text-sm text-gray-500">In D&E</p>
-            <p className="text-2xl font-bold text-blue-600">{projects.filter(p => p.Stage === 'D&E').length}</p>
+            <p className="text-2xl font-bold text-blue-600">{activeProjects.filter(p => p.Stage === 'D&E').length}</p>
           </div>
           <FileText className="w-10 h-10 text-blue-500" />
         </div>
         <div className="bg-white rounded-lg shadow p-6 flex justify-between">
           <div>
             <p className="text-sm text-gray-500">In Concept</p>
-            <p className="text-2xl font-bold text-purple-600">{projects.filter(p => p.Stage === 'Concept').length}</p>
+            <p className="text-2xl font-bold text-purple-600">{activeProjects.filter(p => p.Stage === 'Concept').length}</p>
           </div>
           <Home className="w-10 h-10 text-purple-500" />
         </div>
@@ -893,7 +902,7 @@ function JobScheduleView({ projects, onEdit }) {
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b flex items-center justify-between gap-4 flex-wrap">
-          <span className="font-semibold">Job Schedule</span>
+          <span className="font-semibold">Active Projects</span>
           <div className="flex items-center gap-3">
             <div className="relative">
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -4013,7 +4022,7 @@ const allNavItems = [
   { id: 'design', label: 'Design & Engineering', icon: Pencil },
   { id: 'capacity', label: 'Capacity Planning', icon: Calendar },
   { id: 'wip', label: 'WIP Schedule', icon: ClipboardList },
-  { id: 'jobs', label: 'Job Schedule', icon: Calendar },
+  { id: 'jobs', label: 'Active Projects', icon: Calendar },
   { id: 'queue', label: 'Production Queue', icon: ListOrdered },
   { id: 'scheduler', label: 'Production Scheduler', icon: Factory },
   { id: 'floor', label: 'Manufacturing', icon: Wrench },
