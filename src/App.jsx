@@ -3053,7 +3053,6 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
       setQueue(activeProjects);
     }
   }, [activeProjects, hasChanges]);
-  }, [activeProjects]);
 
   const handleDragStart = (e, index) => {
     setDraggedItem(index);
