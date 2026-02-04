@@ -4760,6 +4760,8 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
   const [stageFilter, setStageFilter] = useState('all'); // Filter by project stage
+  const [editingProject, setEditingProject] = useState(null); // For inline editing
+  const [editForm, setEditForm] = useState({});
 
   // Update queue when projects change (only if no unsaved changes)
   useEffect(() => {
@@ -4825,6 +4827,45 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
     }
   };
 
+  // Inline edit handlers
+  const startEditing = (project) => {
+    setEditingProject(project.id);
+    setEditForm({
+      'Production Start': project['Production Start'] || '',
+      'Target Ship Date': project['Target Ship Date'] || '',
+      'Bay Assignment': project['Bay Assignment'] || '',
+      'Current MFG Stage': project['Current MFG Stage'] || '',
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingProject(null);
+    setEditForm({});
+  };
+
+  const saveInlineEdit = async (projectId) => {
+    setSaving(true);
+    try {
+      const updates = {};
+      if (editForm['Production Start']) updates['Production Start'] = editForm['Production Start'];
+      if (editForm['Target Ship Date']) updates['Target Ship Date'] = editForm['Target Ship Date'];
+      if (editForm['Bay Assignment']) updates['Bay Assignment'] = editForm['Bay Assignment'];
+      if (editForm['Current MFG Stage']) updates['Current MFG Stage'] = editForm['Current MFG Stage'];
+      
+      await airtableAPI.updateProject(projectId, updates);
+      
+      // Update local state
+      setQueue(prev => prev.map(p => p.id === projectId ? { ...p, ...updates } : p));
+      setEditingProject(null);
+      setEditForm({});
+    } catch (err) {
+      console.error('Failed to save:', err);
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Move item within the FULL queue (not filtered)
   const moveItem = (projectId, direction) => {
     const currentIndex = queue.findIndex(p => p.id === projectId);
@@ -4874,13 +4915,16 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
   
   const isFiltered = stageFilter !== 'all';
 
+  const mfgStages = ['', 'Steel Fab', 'Sandblast', 'Framing', 'MEP Rough', 'Insulation', 'Drywall', 'Finishes', 'Cabinets/Trim', 'Final QC', 'Ready to Ship'];
+  const positions = ['', ...POSITION_IDS];
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Production Queue</h2>
-          <p className="text-sm text-gray-500">Drag and drop to set build order • {queue.length} active projects</p>
+          <p className="text-sm text-gray-500">Drag to reorder • Click edit to set dates & position • {queue.length} active projects</p>
         </div>
         <div className="flex items-center gap-3">
           <select
@@ -4930,21 +4974,98 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
         <div className="bg-gray-50 px-4 py-3 border-b grid grid-cols-12 gap-4 text-xs font-semibold text-gray-500 uppercase">
           <div className="col-span-1">#</div>
           <div className="col-span-2">Project</div>
-          <div className="col-span-2">Customer</div>
           <div className="col-span-1">Model</div>
-          <div className="col-span-2">Stage</div>
-          <div className="col-span-2">Mfg Status</div>
-          <div className="col-span-2 text-right">Actions</div>
+          <div className="col-span-1">Stage</div>
+          <div className="col-span-1">Bay</div>
+          <div className="col-span-1">MFG Stage</div>
+          <div className="col-span-2">Prod Start</div>
+          <div className="col-span-2">Target Ship</div>
+          <div className="col-span-1 text-right">Actions</div>
         </div>
 
         <div className="divide-y">
           {filteredQueue.map((project) => {
             const stageColors = getStageColor(project.Stage);
-            const mfgColors = getMfgColor(project['Mfg Status']);
             const queuePosition = getQueuePosition(project.id);
             const queueIndex = queue.findIndex(p => p.id === project.id);
             const isDragging = draggedItem === queueIndex;
             const isDragOver = dragOverIndex === queueIndex;
+            const isEditing = editingProject === project.id;
+
+            if (isEditing) {
+              return (
+                <div key={project.id} className="px-4 py-3 bg-blue-50 border-l-4 border-blue-500">
+                  <div className="grid grid-cols-12 gap-4 items-center">
+                    <div className="col-span-1">
+                      <span className="font-bold text-gray-400">{queuePosition}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="font-semibold text-gray-900">{project['Project ID']}</span>
+                      <div className="text-xs text-gray-500">{project['Status'] || ''}</div>
+                    </div>
+                    <div className="col-span-1">
+                      <span className="text-sm">{project['Model'] || '—'}</span>
+                    </div>
+                    <div className="col-span-1">
+                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
+                        {project.Stage}
+                      </span>
+                    </div>
+                    <div className="col-span-1">
+                      <select 
+                        value={editForm['Bay Assignment']} 
+                        onChange={e => setEditForm({...editForm, 'Bay Assignment': e.target.value})}
+                        className="w-full text-xs border rounded px-2 py-1"
+                      >
+                        {positions.map(p => <option key={p} value={p}>{p || '—'}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-1">
+                      <select 
+                        value={editForm['Current MFG Stage']} 
+                        onChange={e => setEditForm({...editForm, 'Current MFG Stage': e.target.value})}
+                        className="w-full text-xs border rounded px-2 py-1"
+                      >
+                        {mfgStages.map(s => <option key={s} value={s}>{s || '—'}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <input 
+                        type="date" 
+                        value={editForm['Production Start']} 
+                        onChange={e => setEditForm({...editForm, 'Production Start': e.target.value})}
+                        className="w-full text-xs border rounded px-2 py-1"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input 
+                        type="date" 
+                        value={editForm['Target Ship Date']} 
+                        onChange={e => setEditForm({...editForm, 'Target Ship Date': e.target.value})}
+                        className="w-full text-xs border rounded px-2 py-1"
+                      />
+                    </div>
+                    <div className="col-span-1 flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => saveInlineEdit(project.id)}
+                        disabled={saving}
+                        className="p-1.5 text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50"
+                        title="Save"
+                      >
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={cancelEditing}
+                        className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                        title="Cancel"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -4963,7 +5084,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
                   ${!isDragging && !isDragOver ? 'hover:bg-gray-50' : ''}
                 `}
               >
-                {/* Order Number - shows position in full queue */}
+                {/* Order Number */}
                 <div className="col-span-1 flex items-center gap-2">
                   {!isFiltered && <GripVertical className="w-4 h-4 text-gray-400" />}
                   <span className="font-bold text-gray-400">{queuePosition}</span>
@@ -4972,38 +5093,54 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
                 {/* Project ID */}
                 <div className="col-span-2">
                   <span className="font-semibold text-gray-900">{project['Project ID']}</span>
-                </div>
-
-                {/* Customer */}
-                <div className="col-span-2 text-sm text-gray-600 truncate">
-                  {project['Status'] || project['Customer (text)'] || '—'}
+                  <div className="text-xs text-gray-500 truncate">{project['Status'] || ''}</div>
                 </div>
 
                 {/* Model */}
                 <div className="col-span-1">
-                  <span className="text-sm font-medium">{project['Model'] || project['Unit Type'] || '—'}</span>
+                  <span className="text-sm font-medium">{project['Model'] || '—'}</span>
                 </div>
 
                 {/* Stage */}
-                <div className="col-span-2">
+                <div className="col-span-1">
                   <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
                     {project.Stage || '—'}
                   </span>
                 </div>
 
-                {/* Mfg Status */}
+                {/* Bay */}
+                <div className="col-span-1">
+                  <span className="text-xs text-gray-600">{project['Bay Assignment'] || '—'}</span>
+                </div>
+
+                {/* MFG Stage */}
+                <div className="col-span-1">
+                  <span className="text-xs text-gray-600">{project['Current MFG Stage'] || '—'}</span>
+                </div>
+
+                {/* Production Start */}
                 <div className="col-span-2">
-                  {project.Stage === 'Production' || project.Stage === 'Logistics' ? (
-                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${mfgColors.bg} ${mfgColors.text}`}>
-                      {project['Mfg Status'] || 'Not Started'}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-400">—</span>
-                  )}
+                  <span className="text-xs text-gray-600">
+                    {project['Production Start'] ? new Date(project['Production Start']).toLocaleDateString() : '—'}
+                  </span>
+                </div>
+
+                {/* Target Ship */}
+                <div className="col-span-2">
+                  <span className="text-xs text-gray-600">
+                    {project['Target Ship Date'] ? new Date(project['Target Ship Date']).toLocaleDateString() : '—'}
+                  </span>
                 </div>
 
                 {/* Actions */}
-                <div className="col-span-2 flex items-center justify-end gap-1">
+                <div className="col-span-1 flex items-center justify-end gap-1">
+                  <button
+                    onClick={() => startEditing(project)}
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                    title="Edit"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => moveItem(project.id, -1)}
                     disabled={queueIndex === 0}
