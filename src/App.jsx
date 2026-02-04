@@ -301,6 +301,7 @@ const PLANT_POSITIONS = {
   'OF2': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 2 (Wrap/Ship)' },
   'OF3': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 3 (Wrap/Ship)' },
   'OF4': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 4 (Wrap/Ship)' },
+  'STORAGE': { bay: 0, row: 'S', zone: 'STORAGE', color: '#6B7280', desc: 'Storage - Ready to Ship' },
 };
 const POSITION_IDS = Object.keys(PLANT_POSITIONS);
 const INDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].bay > 0);
@@ -1152,6 +1153,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
   const occupiedIndoor = INDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
   const occupiedOutdoor = OUTDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
   const occupiedFlex = FLEX_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
+  const storageCount = getPositionProjects('STORAGE').length;
   const unassigned = productionProjects.filter(p => !p['Bay Assignment']).length;
   const waitingCount = productionProjects.filter(p => p['Bay Assignment'] === 'WFB').length;
 
@@ -1273,6 +1275,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
         <div className="bg-cyan-50 border-cyan-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Flex (Wrap/Ship)</div><div className="text-3xl font-bold text-cyan-600">{occupiedFlex}<span className="text-lg text-gray-400">/4</span></div></div>
         <div className={`rounded-xl border p-4 ${waitingCount > 0 ? 'bg-red-50 border-red-200' : 'bg-white'}`}><div className="text-sm text-gray-500 mb-1">Waiting for Spot</div><div className={`text-3xl font-bold ${waitingCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>{waitingCount}</div></div>
         <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Available</div><div className="text-3xl font-bold text-emerald-600">{12 - occupiedIndoor}</div></div>
+        <div className="bg-gray-100 border-gray-300 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Storage</div><div className="text-3xl font-bold text-gray-600">{storageCount}</div></div>
         <div className={`rounded-xl border p-4 ${unassigned > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}><div className="text-sm text-gray-500 mb-1">Unassigned</div><div className={`text-3xl font-bold ${unassigned > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{unassigned}</div></div>
       </div>
 
@@ -1369,6 +1372,19 @@ function ManufacturingFloorView({ projects, onEdit }) {
                 <PositionCard positionId="OF3" size="small" />
                 <PositionCard positionId="OF4" size="small" />
               </div>
+            </div>
+
+            {/* Storage - Ready to Ship */}
+            <div className="mt-4 border-2 border-dashed border-gray-400 rounded-lg p-4 bg-gray-50/50">
+              <div className="text-xs text-gray-600 font-medium mb-3">STORAGE - Complete & Ready to Ship</div>
+              <div className="grid grid-cols-1 gap-3">
+                <PositionCard positionId="STORAGE" />
+              </div>
+              {getPositionProjects('STORAGE').length > 0 && (
+                <div className="mt-3 text-xs text-gray-500">
+                  {getPositionProjects('STORAGE').length} unit(s) in storage awaiting shipment
+                </div>
+              )}
             </div>
           </div>
 
