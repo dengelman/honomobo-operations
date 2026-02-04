@@ -1508,7 +1508,7 @@ function ProductionSchedulerView({ projects }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Production Scheduler</h2>
-          <p className="text-sm text-gray-500">18 positions • 12-week builds • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
+          <p className="text-sm text-gray-500">18 positions • Model-based build durations • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
         </div>
         <select value={zoneFilter} onChange={e => setZoneFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
           <option value="all">All Positions (18)</option>
@@ -1561,9 +1561,12 @@ function ProductionSchedulerView({ projects }) {
                   const idx = weeks.findIndex(w => w === job.startWeek);
                   if (idx === -1) return null;
                   const left = (idx / weeks.length) * 100;
-                  const duration = isOutdoor ? 4 : SCHED_MFG_DURATION;
+                  // Use model-specific duration converted to weeks (work days / 5)
+                  const modelDurations = MODEL_DURATIONS[job.model?.toUpperCase()] || DEFAULT_DURATIONS;
+                  const durationWeeks = Math.ceil(modelDurations.total / 5);
+                  const duration = isOutdoor ? 4 : durationWeeks;
                   const width = (duration / weeks.length) * 100;
-                  const progress = job.mfgWeek / 12;
+                  const progress = job.mfgWeek / durationWeeks;
                   const market = SCHED_MARKETS[job.market] || SCHED_MARKETS.other;
                   return (
                     <div key={job.id} className="absolute top-1 bottom-1 rounded-md overflow-hidden shadow-sm border cursor-pointer hover:shadow-md" style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, backgroundColor: `${pos.color}15`, borderColor: pos.color }}>
