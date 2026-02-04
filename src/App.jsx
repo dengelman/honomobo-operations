@@ -1589,12 +1589,16 @@ function ProductionSchedulerView({ projects }) {
 // PRODUCTION BOARD VIEW
 // ══════════════════════════════════════════════════════════════════════════════
 const PROD_STAGES = [
-  { id: 'fab_complete', name: 'Fab Complete', color: '#3B82F6' },
-  { id: 'framing_complete', name: 'Framing Complete', color: '#8B5CF6' },
-  { id: 'mech_rough_in', name: 'Mech Rough Ins', color: '#F59E0B' },
-  { id: 'drywall_complete', name: 'Drywall Complete', color: '#EC4899' },
+  { id: 'steel_fab', name: 'Steel Fab', color: '#6B7280' },
+  { id: 'sandblast', name: 'Sandblast', color: '#9CA3AF' },
+  { id: 'framing', name: 'Framing', color: '#3B82F6' },
+  { id: 'mep_rough', name: 'MEP Rough', color: '#F97316' },
+  { id: 'insulation', name: 'Insulation', color: '#EAB308' },
+  { id: 'drywall', name: 'Drywall', color: '#EC4899' },
+  { id: 'finishes', name: 'Finishes', color: '#8B5CF6' },
+  { id: 'cabinets_trim', name: 'Cabinets/Trim', color: '#14B8A6' },
   { id: 'final_qc', name: 'Final QC', color: '#10B981' },
-  { id: 'ready', name: 'Ready to Ship', color: '#06B6D4' }
+  { id: 'ready_to_ship', name: 'Ready to Ship', color: '#06B6D4' }
 ];
 
 // ProductionBoardView merged into ManufacturingFloorView - use 'Kanban Board' tab
