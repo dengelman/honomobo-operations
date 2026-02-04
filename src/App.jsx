@@ -294,17 +294,43 @@ const PLANT_POSITIONS = {
   '4C': { bay: 4, row: 'C', zone: 'FAB 2', color: '#F59E0B', desc: 'Fabrication 2' },
   '4S': { bay: 4, row: 'S', zone: 'FAB FLEX', color: '#F59E0B', desc: 'Fab Flex' },
   'WFB': { bay: 0, row: 'W', zone: 'WAITING', color: '#EF4444', desc: 'Waiting for Build Spot' },
-  'OW': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor West' },
-  'OE': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor East' },
-  'OF1': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 1' },
-  'OF2': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 2' },
-  'OF3': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 3' },
-  'OF4': { bay: 0, row: 'O', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Flex 4' },
+  'ON': { bay: 0, row: 'N', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor North' },
+  'OC': { bay: 0, row: 'C', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor Center' },
+  'OS': { bay: 0, row: 'S', zone: 'OUTDOOR', color: '#8B5CF6', desc: 'Outdoor South' },
+  'OF1': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 1 (Wrap/Ship)' },
+  'OF2': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 2 (Wrap/Ship)' },
+  'OF3': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 3 (Wrap/Ship)' },
+  'OF4': { bay: 0, row: 'F', zone: 'FLEX', color: '#06B6D4', desc: 'Flex Bay 4 (Wrap/Ship)' },
 };
 const POSITION_IDS = Object.keys(PLANT_POSITIONS);
 const INDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].bay > 0);
-const OUTDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].bay === 0 && PLANT_POSITIONS[p].zone === 'OUTDOOR');
+const OUTDOOR_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone === 'OUTDOOR');
+const FLEX_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone === 'FLEX');
 const WAITING_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone === 'WAITING');
+const BUILD_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone === 'BUILD' || PLANT_POSITIONS[p].zone === 'PRE-FAB');
+const FAB_POSITIONS = POSITION_IDS.filter(p => PLANT_POSITIONS[p].zone.startsWith('FAB'));
+
+// Check if a large unit (HO5, HS8) in N or S outdoor position blocks the center
+const checkOutdoorBlocking = (projects) => {
+  const blocking = [];
+  const outdoorProjects = projects.filter(p => ['ON', 'OS'].includes(p['Bay Assignment']));
+  const centerProject = projects.find(p => p['Bay Assignment'] === 'OC');
+  
+  outdoorProjects.forEach(p => {
+    const model = (p['Model'] || '').toUpperCase();
+    // HO5 and HS8 are large enough to block the center
+    if (['HO5', 'HS8'].includes(model) && centerProject) {
+      blocking.push({
+        blocker: p,
+        blocked: centerProject,
+        position: p['Bay Assignment'],
+        message: `${p['Project ID']} (${model}) in ${p['Bay Assignment']} is blocking ${centerProject['Project ID']} in OC from shipping`
+      });
+    }
+  });
+  
+  return blocking;
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PROJECT FORM MODAL
@@ -1120,8 +1146,12 @@ function ManufacturingFloorView({ projects, onEdit }) {
     return projects.length > 0 ? projects[0] : null;
   };
 
+  // Check for outdoor blocking
+  const blockingAlerts = useMemo(() => checkOutdoorBlocking(productionProjects), [productionProjects]);
+
   const occupiedIndoor = INDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
   const occupiedOutdoor = OUTDOOR_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
+  const occupiedFlex = FLEX_POSITIONS.filter(p => getPositionProjects(p).length > 0).length;
   const unassigned = productionProjects.filter(p => !p['Bay Assignment']).length;
   const waitingCount = productionProjects.filter(p => p['Bay Assignment'] === 'WFB').length;
 
@@ -1236,14 +1266,34 @@ function ManufacturingFloorView({ projects, onEdit }) {
       </div>
 
       {/* Stats row - shared */}
-      <div className="grid grid-cols-6 gap-4">
+      <div className="grid grid-cols-7 gap-4">
         <div className="bg-white rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">In Production</div><div className="text-3xl font-bold">{productionProjects.length}</div></div>
-        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Indoor</div><div className="text-3xl font-bold text-blue-600">{occupiedIndoor}<span className="text-lg text-gray-400">/12</span></div></div>
-        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Outdoor</div><div className="text-3xl font-bold text-purple-600">{occupiedOutdoor}<span className="text-lg text-gray-400">/6</span></div></div>
+        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Build Bays</div><div className="text-3xl font-bold text-blue-600">{occupiedIndoor}<span className="text-lg text-gray-400">/12</span></div></div>
+        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Outdoor</div><div className="text-3xl font-bold text-purple-600">{occupiedOutdoor}<span className="text-lg text-gray-400">/3</span></div></div>
+        <div className="bg-cyan-50 border-cyan-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Flex (Wrap/Ship)</div><div className="text-3xl font-bold text-cyan-600">{occupiedFlex}<span className="text-lg text-gray-400">/4</span></div></div>
         <div className={`rounded-xl border p-4 ${waitingCount > 0 ? 'bg-red-50 border-red-200' : 'bg-white'}`}><div className="text-sm text-gray-500 mb-1">Waiting for Spot</div><div className={`text-3xl font-bold ${waitingCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>{waitingCount}</div></div>
-        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Available</div><div className="text-3xl font-bold text-emerald-600">{18 - occupiedIndoor - occupiedOutdoor}</div></div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">Available</div><div className="text-3xl font-bold text-emerald-600">{12 - occupiedIndoor}</div></div>
         <div className={`rounded-xl border p-4 ${unassigned > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}><div className="text-sm text-gray-500 mb-1">Unassigned</div><div className={`text-3xl font-bold ${unassigned > 0 ? 'text-amber-600' : 'text-gray-400'}`}>{unassigned}</div></div>
       </div>
+
+      {/* Outdoor Blocking Alert */}
+      {blockingAlerts.length > 0 && (
+        <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-orange-900 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" />
+              Outdoor Blocking Issue ({blockingAlerts.length})
+            </h3>
+            <span className="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded-full">SHIPPING BLOCKED</span>
+          </div>
+          {blockingAlerts.map((alert, i) => (
+            <div key={i} className="text-sm text-orange-700 mb-1">
+              • {alert.message}
+            </div>
+          ))}
+          <p className="text-xs text-orange-600 mt-2">Large units (HO5, HS8) in ON or OS positions block OC from exiting to ship.</p>
+        </div>
+      )}
 
       {/* Waiting for Build Spot - Bottleneck Alert */}
       {waitingCount > 0 && (
@@ -1289,7 +1339,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                 <div className="text-center font-bold text-gray-700">BAY 1</div>
                 <div className="text-center font-bold text-gray-700">BAY 2</div>
                 <div className="text-center font-bold text-gray-700">BAY 3</div>
-                <div className="text-center font-bold text-gray-700">BAY 4</div>
+                <div className="text-center font-bold text-gray-700">BAY 4 (Fab)</div>
               </div>
               <div className="grid grid-cols-4 gap-4">
                 <div className="space-y-3"><PositionCard positionId="1N" /><PositionCard positionId="1C" /><PositionCard positionId="1S" /></div>
@@ -1300,11 +1350,20 @@ function ManufacturingFloorView({ projects, onEdit }) {
               <div className="flex justify-end mt-2 text-xs text-gray-400 gap-4 pr-4"><span>N = North</span><span>C = Center</span><span>S = South</span></div>
             </div>
 
+            {/* Outdoor Staging */}
             <div className="mt-4 border-2 border-dashed border-purple-300 rounded-lg p-4 bg-purple-50/30">
-              <div className="text-xs text-purple-600 font-medium mb-3">OUTDOOR STAGING (6 positions)</div>
-              <div className="grid grid-cols-6 gap-3">
-                <PositionCard positionId="OW" size="small" />
-                <PositionCard positionId="OE" size="small" />
+              <div className="text-xs text-purple-600 font-medium mb-3">OUTDOOR STAGING (3 positions) - ⚠️ HO5/HS8 in N or S blocks center from shipping</div>
+              <div className="grid grid-cols-3 gap-3">
+                <PositionCard positionId="ON" />
+                <PositionCard positionId="OC" />
+                <PositionCard positionId="OS" />
+              </div>
+            </div>
+
+            {/* Flex Bays - Wrap/Ship */}
+            <div className="mt-4 border-2 border-dashed border-cyan-300 rounded-lg p-4 bg-cyan-50/30">
+              <div className="text-xs text-cyan-600 font-medium mb-3">FLEX BAYS - Wrap & Ready to Ship (4 positions) - Does not tie up build spots</div>
+              <div className="grid grid-cols-4 gap-3">
                 <PositionCard positionId="OF1" size="small" />
                 <PositionCard positionId="OF2" size="small" />
                 <PositionCard positionId="OF3" size="small" />
