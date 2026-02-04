@@ -482,6 +482,10 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'Current MFG Stage': project?.['Current MFG Stage'] || '',
     'Production Start': project?.['Production Start'] || '',
     'Target Ship Date': project?.['Target Ship Date'] || '',
+    // Revenue fields
+    'DE Revenue': project?.['DE Revenue'] || 0,
+    'MFG Revenue': project?.['MFG Revenue'] || 0,
+    'LI Revenue': project?.['LI Revenue'] || 0,
     // Budget fields
     'DE Budget': project?.['DE Budget'] || 0,
     'MFG Budget': project?.['MFG Budget'] || 0,
@@ -623,21 +627,45 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
           {['D&E', 'Permitting', 'Production', 'Logistics', 'Complete'].includes(form['Stage']) && (
             <div className="border-t pt-4 mt-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-gray-700">Budget Overview</h3>
+                <h3 className="font-medium text-gray-700">Revenue & Budget Overview</h3>
                 <span className="text-xs text-gray-400">Edit detailed budget in Project Budget view</span>
               </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">D&E Budget ($)</label>
-                  <input type="number" value={form['DE Budget'] || ''} onChange={e => setForm({ ...form, 'DE Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
+              
+              {/* Revenue Row */}
+              <div className="mb-4">
+                <div className="text-xs font-semibold text-emerald-600 uppercase mb-2">Revenue</div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">D&E Revenue ($)</label>
+                    <input type="number" value={form['DE Revenue'] || ''} onChange={e => setForm({ ...form, 'DE Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">MFG Revenue ($)</label>
+                    <input type="number" value={form['MFG Revenue'] || ''} onChange={e => setForm({ ...form, 'MFG Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">L&I Revenue ($)</label>
+                    <input type="number" value={form['LI Revenue'] || ''} onChange={e => setForm({ ...form, 'LI Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">MFG Budget ($)</label>
-                  <input type="number" value={form['MFG Budget'] || ''} onChange={e => setForm({ ...form, 'MFG Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Logistics Budget ($)</label>
-                  <input type="number" value={form['Logistics Budget'] || ''} onChange={e => setForm({ ...form, 'Logistics Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
+              </div>
+              
+              {/* Budget Row */}
+              <div>
+                <div className="text-xs font-semibold text-blue-600 uppercase mb-2">Budget (Cost)</div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">D&E Budget ($)</label>
+                    <input type="number" value={form['DE Budget'] || ''} onChange={e => setForm({ ...form, 'DE Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">MFG Budget ($)</label>
+                    <input type="number" value={form['MFG Budget'] || ''} onChange={e => setForm({ ...form, 'MFG Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">L&I Budget ($)</label>
+                    <input type="number" value={form['Logistics Budget'] || ''} onChange={e => setForm({ ...form, 'Logistics Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -6368,6 +6396,20 @@ export default function App() {
       const orderVal = parseInt(formData['Production Order']);
       if (!isNaN(orderVal) && orderVal > 0) {
         cleanedData['Production Order'] = orderVal;
+      }
+
+      // Revenue fields
+      const deRevenue = parseInt(formData['DE Revenue']);
+      if (!isNaN(deRevenue) && deRevenue > 0) {
+        cleanedData['DE Revenue'] = deRevenue;
+      }
+      const mfgRevenue = parseInt(formData['MFG Revenue']);
+      if (!isNaN(mfgRevenue) && mfgRevenue > 0) {
+        cleanedData['MFG Revenue'] = mfgRevenue;
+      }
+      const liRevenue = parseInt(formData['LI Revenue']);
+      if (!isNaN(liRevenue) && liRevenue > 0) {
+        cleanedData['LI Revenue'] = liRevenue;
       }
 
       // Budget fields
