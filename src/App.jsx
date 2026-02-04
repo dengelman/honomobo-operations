@@ -12,6 +12,9 @@ const PROJECTS_TABLE = 'Projects';
 const DOCUMENTS_TABLE = 'Documents';
 const ACTUALS_TABLE = 'Actuals';
 const PAYMENTS_TABLE = 'Payments';
+const CHANGE_ORDERS_TABLE = 'Change Orders';
+const BUDGET_LINE_ITEMS_TABLE = 'Budget Line Items';
+const INVOICES_TABLE = 'Invoices';
 
 const airtableAPI = {
   async fetchProjects() {
@@ -45,6 +48,129 @@ const airtableAPI = {
       const data = await res.json();
       return data.records.map(r => ({ id: r.id, ...r.fields }));
     } catch { return []; }
+  },
+  // Change Orders API
+  async fetchChangeOrders() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${CHANGE_ORDERS_TABLE}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async createChangeOrder(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${CHANGE_ORDERS_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async updateChangeOrder(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${CHANGE_ORDERS_TABLE}/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async deleteChangeOrder(id) {
+    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${CHANGE_ORDERS_TABLE}/${id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` }
+    });
+  },
+  // Budget Line Items API
+  async fetchBudgetLineItems() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${BUDGET_LINE_ITEMS_TABLE}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async createBudgetLineItem(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${BUDGET_LINE_ITEMS_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async updateBudgetLineItem(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${BUDGET_LINE_ITEMS_TABLE}/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async deleteBudgetLineItem(id) {
+    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${BUDGET_LINE_ITEMS_TABLE}/${id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` }
+    });
+  },
+  // Invoices API
+  async fetchInvoices() {
+    try {
+      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${INVOICES_TABLE}`;
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.records.map(r => ({ id: r.id, ...r.fields }));
+    } catch { return []; }
+  },
+  async createInvoice(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${INVOICES_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async updateInvoice(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${INVOICES_TABLE}/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async deleteInvoice(id) {
+    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${INVOICES_TABLE}/${id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` }
+    });
+  },
+  // Payments API (updated with create/update/delete)
+  async createPayment(fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PAYMENTS_TABLE}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async updatePayment(id, fields) {
+    const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PAYMENTS_TABLE}/${id}`, {
+      method: 'PATCH', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    return { id: data.id, ...data.fields };
+  },
+  async deletePayment(id) {
+    await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PAYMENTS_TABLE}/${id}`, {
+      method: 'DELETE', headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` }
+    });
   },
   async createProject(fields) {
     const res = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${PROJECTS_TABLE}`, {
@@ -356,6 +482,10 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'Current MFG Stage': project?.['Current MFG Stage'] || '',
     'Production Start': project?.['Production Start'] || '',
     'Target Ship Date': project?.['Target Ship Date'] || '',
+    // Budget fields
+    'DE Budget': project?.['DE Budget'] || 0,
+    'MFG Budget': project?.['MFG Budget'] || 0,
+    'Logistics Budget': project?.['Logistics Budget'] || 0,
   });
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -487,6 +617,30 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
                 </div>
               </div>
             </>
+          )}
+
+          {/* Budget Section - Show for D&E and beyond */}
+          {['D&E', 'Permitting', 'Production', 'Logistics', 'Complete'].includes(form['Stage']) && (
+            <div className="border-t pt-4 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-gray-700">Budget Overview</h3>
+                <span className="text-xs text-gray-400">Edit detailed budget in Project Budget view</span>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">D&E Budget ($)</label>
+                  <input type="number" value={form['DE Budget'] || ''} onChange={e => setForm({ ...form, 'DE Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">MFG Budget ($)</label>
+                  <input type="number" value={form['MFG Budget'] || ''} onChange={e => setForm({ ...form, 'MFG Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Logistics Budget ($)</label>
+                  <input type="number" value={form['Logistics Budget'] || ''} onChange={e => setForm({ ...form, 'Logistics Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" placeholder="0" />
+                </div>
+              </div>
+            </div>
           )}
           
           {/* Delete confirmation */}
@@ -3177,6 +3331,751 @@ function BudgetSummaryContent({ projects }) {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// FINANCIAL MANAGEMENT VIEW - Full CRUD for COs, Budgets, Invoices, Payments
+// ══════════════════════════════════════════════════════════════════════════════
+function FinancialManagementView({ projects, changeOrders, budgetLineItems, invoices, payments, onRefresh }) {
+  const [activeTab, setActiveTab] = useState('overview');
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [showModal, setShowModal] = useState(null); // 'co', 'budget', 'invoice', 'payment'
+  const [editingItem, setEditingItem] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Form states
+  const [coForm, setCoForm] = useState({ Description: '', Amount: '', Status: 'Pending', 'Requested Date': '', 'Requested By': 'Customer' });
+  const [budgetForm, setBudgetForm] = useState({ Category: '', Description: '', Budgeted: '', Actual: '' });
+  const [invoiceForm, setInvoiceForm] = useState({ 'Invoice Number': '', Amount: '', Description: '', 'Invoice Date': '', 'Due Date': '', Status: 'Draft' });
+  const [paymentForm, setPaymentForm] = useState({ Amount: '', 'Payment Date': '', 'Payment Method': 'Wire', Reference: '' });
+
+  const BUDGET_CATEGORIES = [
+    'Design & Engineering', 'Permits & Fees', 'Steel & Fabrication', 'Framing & Structure',
+    'Electrical', 'Plumbing', 'HVAC', 'Insulation', 'Drywall', 'Finishes',
+    'Cabinets & Millwork', 'Appliances', 'Fixtures', 'Shipping & Logistics',
+    'Crane & Install', 'Site Work', 'Contingency', 'Other'
+  ];
+
+  // Filter data by selected project
+  const projectCOs = useMemo(() => {
+    if (!selectedProject) return changeOrders;
+    return changeOrders.filter(co => {
+      const projectLink = co.Project;
+      if (Array.isArray(projectLink)) return projectLink.includes(selectedProject.id);
+      return projectLink === selectedProject.id || projectLink === selectedProject['Project ID'];
+    });
+  }, [changeOrders, selectedProject]);
+
+  const projectBudgetItems = useMemo(() => {
+    if (!selectedProject) return budgetLineItems;
+    return budgetLineItems.filter(item => {
+      const projectLink = item.Project;
+      if (Array.isArray(projectLink)) return projectLink.includes(selectedProject.id);
+      return projectLink === selectedProject.id || projectLink === selectedProject['Project ID'];
+    });
+  }, [budgetLineItems, selectedProject]);
+
+  const projectInvoices = useMemo(() => {
+    if (!selectedProject) return invoices;
+    return invoices.filter(inv => {
+      const projectLink = inv.Project;
+      if (Array.isArray(projectLink)) return projectLink.includes(selectedProject.id);
+      return projectLink === selectedProject.id || projectLink === selectedProject['Project ID'];
+    });
+  }, [invoices, selectedProject]);
+
+  const projectPayments = useMemo(() => {
+    if (!selectedProject) return payments;
+    return payments.filter(pmt => {
+      const projectLink = pmt.Project;
+      if (Array.isArray(projectLink)) return projectLink.includes(selectedProject.id);
+      return projectLink === selectedProject.id || projectLink === selectedProject['Project ID'];
+    });
+  }, [payments, selectedProject]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    const contractValue = selectedProject ? (selectedProject['Contract Value'] || 0) : projects.reduce((s, p) => s + (p['Contract Value'] || 0), 0);
+    const approvedCOs = projectCOs.filter(co => co.Status === 'Approved').reduce((s, co) => s + (co.Amount || 0), 0);
+    const pendingCOs = projectCOs.filter(co => co.Status === 'Pending').reduce((s, co) => s + (co.Amount || 0), 0);
+    const totalContract = contractValue + approvedCOs;
+    const totalBudgeted = projectBudgetItems.reduce((s, item) => s + (item.Budgeted || 0), 0);
+    const totalActual = projectBudgetItems.reduce((s, item) => s + (item.Actual || 0), 0);
+    const totalInvoiced = projectInvoices.reduce((s, inv) => s + (inv.Amount || 0), 0);
+    const totalPaid = projectPayments.reduce((s, pmt) => s + (pmt.Amount || 0), 0);
+    const outstanding = totalInvoiced - totalPaid;
+
+    return { contractValue, approvedCOs, pendingCOs, totalContract, totalBudgeted, totalActual, totalInvoiced, totalPaid, outstanding };
+  }, [selectedProject, projects, projectCOs, projectBudgetItems, projectInvoices, projectPayments]);
+
+  // Filtered projects for dropdown
+  const filteredProjects = useMemo(() => {
+    if (!searchTerm) return projects;
+    const term = searchTerm.toLowerCase();
+    return projects.filter(p => 
+      (p['Project ID'] || '').toLowerCase().includes(term) ||
+      (p['Status'] || '').toLowerCase().includes(term)
+    );
+  }, [projects, searchTerm]);
+
+  // Form handlers
+  const openModal = (type, item = null) => {
+    setShowModal(type);
+    setEditingItem(item);
+    if (type === 'co') {
+      setCoForm(item ? {
+        Description: item.Description || '',
+        Amount: item.Amount || '',
+        Status: item.Status || 'Pending',
+        'Requested Date': item['Requested Date'] || '',
+        'Requested By': item['Requested By'] || 'Customer',
+        'Approved Date': item['Approved Date'] || '',
+        Notes: item.Notes || ''
+      } : { Description: '', Amount: '', Status: 'Pending', 'Requested Date': new Date().toISOString().split('T')[0], 'Requested By': 'Customer', Notes: '' });
+    } else if (type === 'budget') {
+      setBudgetForm(item ? {
+        Category: item.Category || '',
+        Description: item.Description || '',
+        Budgeted: item.Budgeted || '',
+        Actual: item.Actual || '',
+        Notes: item.Notes || ''
+      } : { Category: '', Description: '', Budgeted: '', Actual: '', Notes: '' });
+    } else if (type === 'invoice') {
+      setInvoiceForm(item ? {
+        'Invoice Number': item['Invoice Number'] || '',
+        Amount: item.Amount || '',
+        Description: item.Description || '',
+        'Invoice Date': item['Invoice Date'] || '',
+        'Due Date': item['Due Date'] || '',
+        Status: item.Status || 'Draft',
+        Notes: item.Notes || ''
+      } : { 'Invoice Number': '', Amount: '', Description: '', 'Invoice Date': new Date().toISOString().split('T')[0], 'Due Date': '', Status: 'Draft', Notes: '' });
+    } else if (type === 'payment') {
+      setPaymentForm(item ? {
+        Amount: item.Amount || '',
+        'Payment Date': item['Payment Date'] || '',
+        'Payment Method': item['Payment Method'] || 'Wire',
+        Reference: item.Reference || '',
+        Notes: item.Notes || ''
+      } : { Amount: '', 'Payment Date': new Date().toISOString().split('T')[0], 'Payment Method': 'Wire', Reference: '', Notes: '' });
+    }
+  };
+
+  const closeModal = () => {
+    setShowModal(null);
+    setEditingItem(null);
+  };
+
+  const handleSave = async () => {
+    if (!selectedProject) {
+      alert('Please select a project first');
+      return;
+    }
+    setSaving(true);
+    try {
+      if (showModal === 'co') {
+        const fields = {
+          ...coForm,
+          Amount: parseFloat(coForm.Amount) || 0,
+          Project: [selectedProject.id]
+        };
+        if (editingItem) {
+          await airtableAPI.updateChangeOrder(editingItem.id, fields);
+        } else {
+          await airtableAPI.createChangeOrder(fields);
+        }
+      } else if (showModal === 'budget') {
+        const fields = {
+          ...budgetForm,
+          Budgeted: parseFloat(budgetForm.Budgeted) || 0,
+          Actual: parseFloat(budgetForm.Actual) || 0,
+          Project: [selectedProject.id]
+        };
+        if (editingItem) {
+          await airtableAPI.updateBudgetLineItem(editingItem.id, fields);
+        } else {
+          await airtableAPI.createBudgetLineItem(fields);
+        }
+      } else if (showModal === 'invoice') {
+        const fields = {
+          ...invoiceForm,
+          Amount: parseFloat(invoiceForm.Amount) || 0,
+          Project: [selectedProject.id]
+        };
+        if (editingItem) {
+          await airtableAPI.updateInvoice(editingItem.id, fields);
+        } else {
+          await airtableAPI.createInvoice(fields);
+        }
+      } else if (showModal === 'payment') {
+        const fields = {
+          ...paymentForm,
+          Amount: parseFloat(paymentForm.Amount) || 0,
+          Project: [selectedProject.id]
+        };
+        if (editingItem) {
+          await airtableAPI.updatePayment(editingItem.id, fields);
+        } else {
+          await airtableAPI.createPayment(fields);
+        }
+      }
+      closeModal();
+      onRefresh();
+    } catch (err) {
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (type, id) => {
+    if (!confirm('Are you sure you want to delete this item?')) return;
+    setSaving(true);
+    try {
+      if (type === 'co') await airtableAPI.deleteChangeOrder(id);
+      else if (type === 'budget') await airtableAPI.deleteBudgetLineItem(id);
+      else if (type === 'invoice') await airtableAPI.deleteInvoice(id);
+      else if (type === 'payment') await airtableAPI.deletePayment(id);
+      onRefresh();
+    } catch (err) {
+      alert('Failed to delete: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Financial Management</h2>
+          <p className="text-sm text-gray-500">Change Orders • Budgets • Invoices • Payments</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Project Selector */}
+          <div className="relative">
+            <select
+              value={selectedProject?.id || ''}
+              onChange={e => {
+                const proj = projects.find(p => p.id === e.target.value);
+                setSelectedProject(proj || null);
+              }}
+              className="border rounded-lg px-4 py-2 pr-10 text-sm min-w-[250px]"
+            >
+              <option value="">All Projects</option>
+              {filteredProjects.map(p => (
+                <option key={p.id} value={p.id}>{p['Project ID']} - {p['Status'] || 'No Name'}</option>
+              ))}
+            </select>
+          </div>
+          <button onClick={onRefresh} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+            <RefreshCw className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-6 gap-4">
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Contract Value</div>
+          <div className="text-2xl font-bold">{formatCurrency(totals.contractValue)}</div>
+        </div>
+        <div className="bg-emerald-50 border-emerald-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Approved COs</div>
+          <div className="text-2xl font-bold text-emerald-600">+{formatCurrency(totals.approvedCOs)}</div>
+        </div>
+        <div className="bg-amber-50 border-amber-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Pending COs</div>
+          <div className="text-2xl font-bold text-amber-600">{formatCurrency(totals.pendingCOs)}</div>
+        </div>
+        <div className="bg-blue-50 border-blue-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Total Contract</div>
+          <div className="text-2xl font-bold text-blue-600">{formatCurrency(totals.totalContract)}</div>
+        </div>
+        <div className="bg-purple-50 border-purple-200 rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">Invoiced</div>
+          <div className="text-2xl font-bold text-purple-600">{formatCurrency(totals.totalInvoiced)}</div>
+        </div>
+        <div className={`rounded-xl border p-4 ${totals.outstanding > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="text-sm text-gray-500 mb-1">Outstanding</div>
+          <div className={`text-2xl font-bold ${totals.outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatCurrency(totals.outstanding)}</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1 w-fit">
+        {['overview', 'changeorders', 'budget', 'invoices', 'payments'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === tab ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+          >
+            {tab === 'changeorders' ? 'Change Orders' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview Tab */}
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-2 gap-6">
+          {/* Budget vs Actual */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <span className="font-semibold">Budget vs Actual</span>
+              <span className="text-sm text-gray-500">{projectBudgetItems.length} line items</span>
+            </div>
+            <div className="p-6">
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Total Budgeted</span>
+                  <span className="font-semibold">{formatCurrency(totals.totalBudgeted)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Total Actual</span>
+                  <span className="font-semibold">{formatCurrency(totals.totalActual)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-3">
+                  <span className="text-gray-500">Variance</span>
+                  <span className={`font-semibold ${totals.totalBudgeted - totals.totalActual >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(totals.totalBudgeted - totals.totalActual)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Status */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <span className="font-semibold">Payment Status</span>
+              <span className="text-sm text-gray-500">{projectPayments.length} payments</span>
+            </div>
+            <div className="p-6">
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Total Invoiced</span>
+                  <span className="font-semibold">{formatCurrency(totals.totalInvoiced)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Total Paid</span>
+                  <span className="font-semibold text-emerald-600">{formatCurrency(totals.totalPaid)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-3">
+                  <span className="text-gray-500">Outstanding</span>
+                  <span className={`font-semibold ${totals.outstanding > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {formatCurrency(totals.outstanding)}
+                  </span>
+                </div>
+                {totals.totalContract > 0 && (
+                  <div className="mt-4">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                      <span>Collection Progress</span>
+                      <span>{Math.round((totals.totalPaid / totals.totalContract) * 100)}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.min(100, (totals.totalPaid / totals.totalContract) * 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Orders Tab */}
+      {activeTab === 'changeorders' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <span className="font-semibold">Change Orders ({projectCOs.length})</span>
+            <button onClick={() => openModal('co')} disabled={!selectedProject} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              <Plus className="w-4 h-4" /> Add CO
+            </button>
+          </div>
+          {!selectedProject && (
+            <div className="p-6 text-center text-gray-500">Select a project to manage change orders</div>
+          )}
+          {selectedProject && projectCOs.length === 0 && (
+            <div className="p-6 text-center text-gray-500">No change orders yet</div>
+          )}
+          {projectCOs.length > 0 && (
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CO #</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectCOs.map(co => (
+                  <tr key={co.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 font-medium">CO-{co['CO Number'] || '?'}</td>
+                    <td className="px-6 py-4 text-sm">{co.Description || '—'}</td>
+                    <td className="px-6 py-4 text-right font-medium">{formatCurrency(co.Amount)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        co.Status === 'Approved' ? 'bg-emerald-100 text-emerald-700' :
+                        co.Status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>{co.Status}</span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{co['Requested Date'] || '—'}</td>
+                    <td className="px-6 py-4 text-right">
+                      <button onClick={() => openModal('co', co)} className="p-1 text-gray-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete('co', co.id)} className="p-1 text-gray-400 hover:text-red-600 ml-1"><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Budget Tab */}
+      {activeTab === 'budget' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <span className="font-semibold">Budget Line Items ({projectBudgetItems.length})</span>
+            <button onClick={() => openModal('budget')} disabled={!selectedProject} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              <Plus className="w-4 h-4" /> Add Line Item
+            </button>
+          </div>
+          {!selectedProject && (
+            <div className="p-6 text-center text-gray-500">Select a project to manage budget</div>
+          )}
+          {selectedProject && projectBudgetItems.length === 0 && (
+            <div className="p-6 text-center text-gray-500">No budget line items yet</div>
+          )}
+          {projectBudgetItems.length > 0 && (
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Budgeted</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actual</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectBudgetItems.map(item => {
+                  const variance = (item.Budgeted || 0) - (item.Actual || 0);
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 font-medium">{item.Category || '—'}</td>
+                      <td className="px-6 py-4 text-sm">{item.Description || '—'}</td>
+                      <td className="px-6 py-4 text-right">{formatCurrency(item.Budgeted)}</td>
+                      <td className="px-6 py-4 text-right">{formatCurrency(item.Actual)}</td>
+                      <td className={`px-6 py-4 text-right font-medium ${variance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {formatCurrency(variance)}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button onClick={() => openModal('budget', item)} className="p-1 text-gray-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDelete('budget', item.id)} className="p-1 text-gray-400 hover:text-red-600 ml-1"><Trash2 className="w-4 h-4" /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-gray-50 font-semibold">
+                <tr>
+                  <td className="px-6 py-3" colSpan="2">Total</td>
+                  <td className="px-6 py-3 text-right">{formatCurrency(totals.totalBudgeted)}</td>
+                  <td className="px-6 py-3 text-right">{formatCurrency(totals.totalActual)}</td>
+                  <td className={`px-6 py-3 text-right ${totals.totalBudgeted - totals.totalActual >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(totals.totalBudgeted - totals.totalActual)}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Invoices Tab */}
+      {activeTab === 'invoices' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <span className="font-semibold">Invoices ({projectInvoices.length})</span>
+            <button onClick={() => openModal('invoice')} disabled={!selectedProject} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              <Plus className="w-4 h-4" /> Add Invoice
+            </button>
+          </div>
+          {!selectedProject && (
+            <div className="p-6 text-center text-gray-500">Select a project to manage invoices</div>
+          )}
+          {selectedProject && projectInvoices.length === 0 && (
+            <div className="p-6 text-center text-gray-500">No invoices yet</div>
+          )}
+          {projectInvoices.length > 0 && (
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectInvoices.map(inv => (
+                  <tr key={inv.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 font-medium">{inv['Invoice Number'] || '—'}</td>
+                    <td className="px-6 py-4 text-sm">{inv.Description || '—'}</td>
+                    <td className="px-6 py-4 text-right font-medium">{formatCurrency(inv.Amount)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        inv.Status === 'Paid' ? 'bg-emerald-100 text-emerald-700' :
+                        inv.Status === 'Overdue' ? 'bg-red-100 text-red-700' :
+                        inv.Status === 'Sent' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>{inv.Status}</span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{inv['Invoice Date'] || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{inv['Due Date'] || '—'}</td>
+                    <td className="px-6 py-4 text-right">
+                      <button onClick={() => openModal('invoice', inv)} className="p-1 text-gray-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete('invoice', inv.id)} className="p-1 text-gray-400 hover:text-red-600 ml-1"><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Payments Tab */}
+      {activeTab === 'payments' && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b flex items-center justify-between">
+            <span className="font-semibold">Payments ({projectPayments.length})</span>
+            <button onClick={() => openModal('payment')} disabled={!selectedProject} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              <Plus className="w-4 h-4" /> Add Payment
+            </button>
+          </div>
+          {!selectedProject && (
+            <div className="p-6 text-center text-gray-500">Select a project to manage payments</div>
+          )}
+          {selectedProject && projectPayments.length === 0 && (
+            <div className="p-6 text-center text-gray-500">No payments yet</div>
+          )}
+          {projectPayments.length > 0 && (
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {projectPayments.map(pmt => (
+                  <tr key={pmt.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">{pmt['Payment Date'] || '—'}</td>
+                    <td className="px-6 py-4 text-right font-medium text-emerald-600">{formatCurrency(pmt.Amount)}</td>
+                    <td className="px-6 py-4 text-sm">{pmt['Payment Method'] || '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{pmt.Reference || '—'}</td>
+                    <td className="px-6 py-4 text-right">
+                      <button onClick={() => openModal('payment', pmt)} className="p-1 text-gray-400 hover:text-blue-600"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleDelete('payment', pmt.id)} className="p-1 text-gray-400 hover:text-red-600 ml-1"><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-gray-50 font-semibold">
+                <tr>
+                  <td className="px-6 py-3">Total</td>
+                  <td className="px-6 py-3 text-right text-emerald-600">{formatCurrency(totals.totalPaid)}</td>
+                  <td colSpan="3"></td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold">
+                {editingItem ? 'Edit' : 'Add'} {showModal === 'co' ? 'Change Order' : showModal === 'budget' ? 'Budget Line Item' : showModal === 'invoice' ? 'Invoice' : 'Payment'}
+              </h3>
+              <button onClick={closeModal} className="p-2 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+
+            {/* CO Form */}
+            {showModal === 'co' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Description</label>
+                  <textarea value={coForm.Description} onChange={e => setCoForm({...coForm, Description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="2" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Amount ($)</label>
+                    <input type="number" value={coForm.Amount} onChange={e => setCoForm({...coForm, Amount: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Status</label>
+                    <select value={coForm.Status} onChange={e => setCoForm({...coForm, Status: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Requested Date</label>
+                    <input type="date" value={coForm['Requested Date']} onChange={e => setCoForm({...coForm, 'Requested Date': e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Requested By</label>
+                    <select value={coForm['Requested By']} onChange={e => setCoForm({...coForm, 'Requested By': e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="Customer">Customer</option>
+                      <option value="Honomobo">Honomobo</option>
+                      <option value="Subcontractor">Subcontractor</option>
+                    </select>
+                  </div>
+                </div>
+                {coForm.Status === 'Approved' && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Approved Date</label>
+                    <input type="date" value={coForm['Approved Date'] || ''} onChange={e => setCoForm({...coForm, 'Approved Date': e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Budget Form */}
+            {showModal === 'budget' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Category</label>
+                  <select value={budgetForm.Category} onChange={e => setBudgetForm({...budgetForm, Category: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                    <option value="">Select Category</option>
+                    {BUDGET_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Description</label>
+                  <input type="text" value={budgetForm.Description} onChange={e => setBudgetForm({...budgetForm, Description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Budgeted ($)</label>
+                    <input type="number" value={budgetForm.Budgeted} onChange={e => setBudgetForm({...budgetForm, Budgeted: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Actual ($)</label>
+                    <input type="number" value={budgetForm.Actual} onChange={e => setBudgetForm({...budgetForm, Actual: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Invoice Form */}
+            {showModal === 'invoice' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Invoice Number</label>
+                    <input type="text" value={invoiceForm['Invoice Number']} onChange={e => setInvoiceForm({...invoiceForm, 'Invoice Number': e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="INV-2024-001" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Amount ($)</label>
+                    <input type="number" value={invoiceForm.Amount} onChange={e => setInvoiceForm({...invoiceForm, Amount: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Description</label>
+                  <input type="text" value={invoiceForm.Description} onChange={e => setInvoiceForm({...invoiceForm, Description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Invoice Date</label>
+                    <input type="date" value={invoiceForm['Invoice Date']} onChange={e => setInvoiceForm({...invoiceForm, 'Invoice Date': e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Due Date</label>
+                    <input type="date" value={invoiceForm['Due Date']} onChange={e => setInvoiceForm({...invoiceForm, 'Due Date': e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Status</label>
+                    <select value={invoiceForm.Status} onChange={e => setInvoiceForm({...invoiceForm, Status: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="Draft">Draft</option>
+                      <option value="Sent">Sent</option>
+                      <option value="Paid">Paid</option>
+                      <option value="Overdue">Overdue</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Payment Form */}
+            {showModal === 'payment' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Amount ($)</label>
+                    <input type="number" value={paymentForm.Amount} onChange={e => setPaymentForm({...paymentForm, Amount: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Payment Date</label>
+                    <input type="date" value={paymentForm['Payment Date']} onChange={e => setPaymentForm({...paymentForm, 'Payment Date': e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Payment Method</label>
+                    <select value={paymentForm['Payment Method']} onChange={e => setPaymentForm({...paymentForm, 'Payment Method': e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="Wire">Wire</option>
+                      <option value="Check">Check</option>
+                      <option value="ACH">ACH</option>
+                      <option value="Credit Card">Credit Card</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Reference</label>
+                    <input type="text" value={paymentForm.Reference} onChange={e => setPaymentForm({...paymentForm, Reference: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="Check #, Wire ref, etc." />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+              <button onClick={closeModal} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+              <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                {editingItem ? 'Update' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Keep old BudgetView function for backwards compatibility but mark as deprecated
 function BudgetView({ projects }) {
   return <BudgetSummaryContent projects={projects} />;
@@ -3188,6 +4087,8 @@ function BudgetView({ projects }) {
 function ProjectBudgetView({ projects, actuals }) {
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [editingField, setEditingField] = useState(null); // {code, value}
+  const [saving, setSaving] = useState(false);
 
   const activeProjects = useMemo(() => 
     projects
@@ -3254,6 +4155,30 @@ function ProjectBudgetView({ projects, actuals }) {
     ]
   };
 
+  // All budget fields for easy lookup
+  const ALL_BUDGET_FIELDS = [
+    ...SAGE_ACCOUNTS.revenue,
+    ...SAGE_ACCOUNTS.materials,
+    ...SAGE_ACCOUNTS.labor,
+    ...SAGE_ACCOUNTS.other
+  ];
+
+  const handleSaveBudgetField = async (fieldName, value) => {
+    if (!selectedProject) return;
+    setSaving(true);
+    try {
+      const numValue = parseFloat(value) || 0;
+      await airtableAPI.updateProject(selectedProject.id, { [fieldName]: numValue });
+      // Update will reflect on next refresh
+      setEditingField(null);
+    } catch (err) {
+      console.error('Failed to save:', err);
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const projectBudget = useMemo(() => {
     if (!selectedProject) return null;
     
@@ -3277,6 +4202,7 @@ function ProjectBudgetView({ projects, actuals }) {
         return {
           code: acc.code,
           name: acc.name,
+          field: acc.field,
           actual: actual
         };
       });
@@ -3316,7 +4242,7 @@ function ProjectBudgetView({ projects, actuals }) {
     );
   }
 
-  // Render line items table section
+  // Render line items table section with editing
   const LineItemsSection = ({ title, items, total, bgColor }) => (
     <div className="mb-4">
       <div className={`px-4 py-2 ${bgColor} font-semibold text-sm flex justify-between`}>
@@ -3325,18 +4251,41 @@ function ProjectBudgetView({ projects, actuals }) {
       </div>
       <table className="min-w-full">
         <tbody className="divide-y divide-gray-100">
-          {items.filter(item => item.actual !== 0).map(item => (
-            <tr key={item.code} className="hover:bg-gray-50">
-              <td className="px-4 py-2 text-sm text-gray-500 w-20">{item.code}</td>
-              <td className="px-4 py-2 text-sm">{item.name}</td>
-              <td className="px-4 py-2 text-sm text-right font-medium">{formatCurrency(item.actual)}</td>
-            </tr>
-          ))}
-          {items.filter(item => item.actual !== 0).length === 0 && (
-            <tr>
-              <td colSpan={3} className="px-4 py-3 text-sm text-gray-400 text-center italic">No expenses recorded</td>
-            </tr>
-          )}
+          {items.map(item => {
+            const isEditing = editingField?.code === item.code;
+            return (
+              <tr key={item.code} className="hover:bg-gray-50 group">
+                <td className="px-4 py-2 text-sm text-gray-500 w-20">{item.code}</td>
+                <td className="px-4 py-2 text-sm">{item.name}</td>
+                <td className="px-4 py-2 text-sm text-right font-medium w-40">
+                  {isEditing ? (
+                    <div className="flex items-center gap-1 justify-end">
+                      <span className="text-gray-400">$</span>
+                      <input
+                        type="number"
+                        autoFocus
+                        defaultValue={item.actual}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleSaveBudgetField(item.field, e.target.value);
+                          if (e.key === 'Escape') setEditingField(null);
+                        }}
+                        onBlur={e => handleSaveBudgetField(item.field, e.target.value)}
+                        className="w-24 px-2 py-1 border rounded text-right text-sm"
+                      />
+                    </div>
+                  ) : (
+                    <div 
+                      className="cursor-pointer hover:bg-blue-50 px-2 py-1 rounded flex items-center justify-end gap-2"
+                      onClick={() => setEditingField({ code: item.code, value: item.actual })}
+                    >
+                      <span>{formatCurrency(item.actual)}</span>
+                      <Edit2 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100" />
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -5214,6 +6163,7 @@ const allNavItems = [
   { id: 'floor', label: 'Manufacturing', icon: Wrench },
   { id: 'simulator', label: 'Floor Simulator', icon: Clock },
   { id: 'analytics', label: 'Production Analytics', icon: TrendingUp },
+  { id: 'financial', label: 'Financial Mgmt', icon: CreditCard },
   { id: 'projectbudget', label: 'Project Budget', icon: Calculator },
   { id: 'pl', label: 'Financials', icon: DollarSign },
   { id: 'drawings', label: 'Drawings', icon: FileText },
@@ -5223,12 +6173,12 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'capacity', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'simulator', 'analytics', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'capacity', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'simulator', 'analytics', 'financial', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
   de_manager: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'capacity', 'jobs', 'queue', 'scheduler', 'simulator', 'analytics', 'drawings', 'projectbudget', 'portal'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'capacity', 'jobs', 'queue', 'scheduler', 'simulator', 'analytics', 'financial', 'drawings', 'projectbudget', 'portal'],
   factory: ['floor', 'simulator', 'analytics', 'queue', 'scheduler', 'capacity'],
   qc: ['floor', 'simulator', 'drawings'],
-  finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'capacity', 'wip', 'projectbudget', 'pl', 'sage', 'deviations'],
+  finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'capacity', 'wip', 'financial', 'projectbudget', 'pl', 'sage', 'deviations'],
   customer: ['portal'],
 };
 
@@ -5295,6 +6245,9 @@ export default function App() {
   const [actuals, setActuals] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [changeOrders, setChangeOrders] = useState([]);
+  const [budgetLineItems, setBudgetLineItems] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -5322,13 +6275,16 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [projData, docData, paymentData, actualsData, tasksData, teamData] = await Promise.all([
+      const [projData, docData, paymentData, actualsData, tasksData, teamData, coData, budgetData, invoiceData] = await Promise.all([
         airtableAPI.fetchProjects(),
         airtableAPI.fetchDocuments(),
         airtableAPI.fetchPayments(),
         airtableAPI.fetchActuals(),
         airtableAPI.fetchTasks(),
         airtableAPI.fetchTeamMembers(),
+        airtableAPI.fetchChangeOrders(),
+        airtableAPI.fetchBudgetLineItems(),
+        airtableAPI.fetchInvoices(),
       ]);
       setProjects(projData);
       setDocuments(docData);
@@ -5336,6 +6292,9 @@ export default function App() {
       setActuals(actualsData);
       setTasks(tasksData);
       setTeamMembers(teamData);
+      setChangeOrders(coData);
+      setBudgetLineItems(budgetData);
+      setInvoices(invoiceData);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -5409,6 +6368,20 @@ export default function App() {
       const orderVal = parseInt(formData['Production Order']);
       if (!isNaN(orderVal) && orderVal > 0) {
         cleanedData['Production Order'] = orderVal;
+      }
+
+      // Budget fields
+      const deBudget = parseInt(formData['DE Budget']);
+      if (!isNaN(deBudget) && deBudget > 0) {
+        cleanedData['DE Budget'] = deBudget;
+      }
+      const mfgBudget = parseInt(formData['MFG Budget']);
+      if (!isNaN(mfgBudget) && mfgBudget > 0) {
+        cleanedData['MFG Budget'] = mfgBudget;
+      }
+      const logBudget = parseInt(formData['Logistics Budget']);
+      if (!isNaN(logBudget) && logBudget > 0) {
+        cleanedData['Logistics Budget'] = logBudget;
       }
 
       console.log('Form data received:', formData);
@@ -5492,6 +6465,7 @@ export default function App() {
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
       case 'simulator': return <FloorSimulatorView projects={projects} onEdit={handleEdit} />;
       case 'analytics': return <ProductionAnalyticsView projects={projects} />;
+      case 'financial': return <FinancialManagementView projects={projects} changeOrders={changeOrders} budgetLineItems={budgetLineItems} invoices={invoices} payments={payments} onRefresh={loadData} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
       case 'pl': return <FinancialsView projects={projects} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
