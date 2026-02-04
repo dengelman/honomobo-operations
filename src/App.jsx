@@ -212,6 +212,7 @@ const MODEL_DURATIONS = {
   'HO3': { steel_fab: 7, sandblast: 5, framing: 5, mep_rough: 6, insulation: 3, drywall: 4, finishes: 5, cabinets_trim: 5, final_qc: 3, ready_to_ship: 3, total: 46 },
   'HO4': { steel_fab: 8, sandblast: 5, framing: 8, mep_rough: 7, insulation: 3, drywall: 4, finishes: 6, cabinets_trim: 6, final_qc: 4, ready_to_ship: 4, total: 55 },
   'HO5': { steel_fab: 10, sandblast: 5, framing: 10, mep_rough: 8, insulation: 3, drywall: 5, finishes: 7, cabinets_trim: 7, final_qc: 5, ready_to_ship: 5, total: 65 },
+  'HS6': { steel_fab: 12, sandblast: 5, framing: 12, mep_rough: 9, insulation: 4, drywall: 6, finishes: 8, cabinets_trim: 8, final_qc: 5, ready_to_ship: 6, total: 75 },
   'HS8': { steel_fab: 15, sandblast: 5, framing: 15, mep_rough: 10, insulation: 5, drywall: 7, finishes: 10, cabinets_trim: 10, final_qc: 7, ready_to_ship: 8, total: 92 },
   'SO1': { steel_fab: 4, sandblast: 5, framing: 3, mep_rough: 4, insulation: 2, drywall: 4, finishes: 3, cabinets_trim: 3, final_qc: 2, ready_to_ship: 1, total: 31 },
 };
@@ -364,7 +365,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
   const mfgStages = ['', 'Steel Fab', 'Sandblast', 'Framing', 'MEP Rough', 'Insulation', 'Drywall', 'Finishes', 'Cabinets/Trim', 'Final QC', 'Ready to Ship'];
   const pms = ['', 'Ryan Sieben', 'Will Colford', 'Nash Thornton', 'Jarod Kawalle'];
-  const models = ['', 'HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1', 'Custom'];
+  const models = ['', 'HO2', 'HO3', 'HO4', 'HO5', 'HS6', 'HS8', 'SO1', 'Custom'];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -2673,7 +2674,7 @@ function ProductionAnalyticsView({ projects }) {
 
   // Calculate averages by model
   const modelAverages = useMemo(() => {
-    const models = ['HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1'];
+    const models = ['HO2', 'HO3', 'HO4', 'HO5', 'HS6', 'HS8', 'SO1'];
     return models.map(model => {
       const modelProjects = completedProjects.filter(p => p.model === model);
       if (modelProjects.length === 0) return { model, count: 0, avgDays: 0, targetDays: MODEL_DURATIONS[model]?.total || 0, variance: 0, onTimeRate: 0 };
