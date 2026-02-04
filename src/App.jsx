@@ -5235,12 +5235,11 @@ export default function App() {
       //   cleanedData['Project Manager'] = formData['Project Manager'];
       // }
       
-      // Model / Unit Type - using field ID because field name wasn't working
+      // Model / Unit Type
       if (hasValue(formData['Model'])) {
-        console.log('Model value to send:', formData['Model']);
-        cleanedData['fld3m0a8xq7XIqkaF'] = formData['Model'];
+        cleanedData['Model'] = formData['Model'];
       }
-      // Current MFG Stage (new 10-stage tracking)
+      // Current MFG Stage
       if (hasValue(formData['Current MFG Stage'])) {
         cleanedData['Current MFG Stage'] = formData['Current MFG Stage'];
       }
