@@ -163,40 +163,7 @@ const airtableAPI = {
     if (!res.ok) throw new Error('Failed to create tasks batch');
     const data = await res.json();
     return data.records.map(r => ({ id: r.id, ...r.fields }));
-  },
-  async fetchModels() {
-    try {
-      const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Models`;
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.records.map(r => ({ id: r.id, ...r.fields }));
-    } catch { return []; }
   }
-};
-
-// Global models lookup - populated on load
-let modelsLookup = {};
-
-// Helper to get model name from project (handles both linked record and plain string)
-const getModelName = (project) => {
-  if (!project) return '';
-  const modelField = project['Model'];
-
-  // If Model is an array (linked record), look up the name
-  if (Array.isArray(modelField) && modelField.length > 0) {
-    const modelId = modelField[0];
-    const modelRecord = modelsLookup[modelId];
-    return modelRecord?.Name || modelRecord?.['Model Name'] || '';
-  }
-
-  // If Model is a string, use it directly
-  if (typeof modelField === 'string') {
-    return modelField;
-  }
-
-  // Fallback to Unit Type
-  return project['Unit Type'] || '';
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -207,21 +174,69 @@ const formatCompact = v => v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 
 
 // Get mod count from Model/Unit Type (HO2=2, HO3=3, HO5=5, HS6=6, HS8=8, SO1=1, etc.)
 const getModCountFromModel = (project) => {
-  // Use getModelName to handle both linked records and plain strings
-  const model = getModelName(project).toUpperCase();
-
+  const model = (project?.['Model'] || project?.['Unit Type'] || '').toUpperCase();
+  
   // Extract number from model name (HO2, HO3, HO4, HO5, HS6, HS8, HS12, SO1)
   const match = model.match(/(HO|HS|SO)(\d+)/);
   if (match) {
     return parseInt(match[2]) || 1;
   }
-
+  
   // Special cases
   if (model.includes('BATH') || model.includes('BAR')) return 1;
   if (model.includes('PD')) return 5; // Pod?
-
+  
   // Default
   return 1;
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MFG STAGES & MODEL DURATIONS (Work Days)
+// ══════════════════════════════════════════════════════════════════════════════
+const MFG_STAGES = [
+  { id: 'steel_fab', name: 'Steel Fab', location: 'fab', color: '#6B7280' },
+  { id: 'sandblast', name: 'Sandblast', location: 'outside', color: '#9CA3AF' },
+  { id: 'framing', name: 'Framing', location: 'build', color: '#3B82F6' },
+  { id: 'mep_rough', name: 'MEP Rough', location: 'build', color: '#F97316' },
+  { id: 'insulation', name: 'Insulation', location: 'build', color: '#EAB308' },
+  { id: 'drywall', name: 'Drywall', location: 'build', color: '#EC4899' },
+  { id: 'finishes', name: 'Finishes', location: 'build', color: '#8B5CF6' },
+  { id: 'cabinets_trim', name: 'Cabinets/Trim', location: 'build', color: '#14B8A6' },
+  { id: 'final_qc', name: 'Final QC', location: 'build', color: '#10B981' },
+  { id: 'ready_to_ship', name: 'Ready to Ship', location: 'flex', color: '#06B6D4' },
+];
+
+// Duration in work days per model per stage
+const MODEL_DURATIONS = {
+  'HO2': { steel_fab: 5, sandblast: 5, framing: 4, mep_rough: 5, insulation: 3, drywall: 4, finishes: 5, cabinets_trim: 5, final_qc: 3, ready_to_ship: 2, total: 41 },
+  'HO3': { steel_fab: 7, sandblast: 5, framing: 5, mep_rough: 6, insulation: 3, drywall: 4, finishes: 5, cabinets_trim: 5, final_qc: 3, ready_to_ship: 3, total: 46 },
+  'HO4': { steel_fab: 8, sandblast: 5, framing: 8, mep_rough: 7, insulation: 3, drywall: 4, finishes: 6, cabinets_trim: 6, final_qc: 4, ready_to_ship: 4, total: 55 },
+  'HO5': { steel_fab: 10, sandblast: 5, framing: 10, mep_rough: 8, insulation: 3, drywall: 5, finishes: 7, cabinets_trim: 7, final_qc: 5, ready_to_ship: 5, total: 65 },
+  'HS8': { steel_fab: 15, sandblast: 5, framing: 15, mep_rough: 10, insulation: 5, drywall: 7, finishes: 10, cabinets_trim: 10, final_qc: 7, ready_to_ship: 8, total: 92 },
+  'SO1': { steel_fab: 4, sandblast: 5, framing: 3, mep_rough: 4, insulation: 2, drywall: 4, finishes: 3, cabinets_trim: 3, final_qc: 2, ready_to_ship: 1, total: 31 },
+};
+
+// Default durations (use HO3 as baseline)
+const DEFAULT_DURATIONS = MODEL_DURATIONS['HO3'];
+
+// Get durations for a project based on model
+const getModelDurations = (project) => {
+  const model = (project?.['Model'] || '').toUpperCase();
+  return MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+};
+
+// Map Current MFG Stage field to stage id
+const MFG_STAGE_MAP = {
+  'Steel Fab': 'steel_fab',
+  'Sandblast': 'sandblast',
+  'Framing': 'framing',
+  'MEP Rough': 'mep_rough',
+  'Insulation': 'insulation',
+  'Drywall': 'drywall',
+  'Finishes': 'finishes',
+  'Cabinets/Trim': 'cabinets_trim',
+  'Final QC': 'final_qc',
+  'Ready to Ship': 'ready_to_ship',
 };
 
 const MARKET_MAP = {
@@ -309,7 +324,10 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'MFG Week': project?.['MFG Week'] || '',
     'MFG Status': project?.['MFG Status'] || '',
     'Project Manager': project?.['Project Manager'] || '',
-    'Model': getModelName(project) || '',
+    'Model': project?.['Model'] || '',
+    'Current MFG Stage': project?.['Current MFG Stage'] || '',
+    'Production Start': project?.['Production Start'] || '',
+    'Target Ship Date': project?.['Target Ship Date'] || '',
   });
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -317,8 +335,9 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const positions = ['', ...POSITION_IDS];
   const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
+  const mfgStages = ['', 'Steel Fab', 'Sandblast', 'Framing', 'MEP Rough', 'Insulation', 'Drywall', 'Finishes', 'Cabinets/Trim', 'Final QC', 'Ready to Ship'];
   const pms = ['', 'Ryan Sieben', 'Will Colford', 'Nash Thornton', 'Jarod Kawalle'];
-  const models = ['', 'HO1', 'HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1', 'Custom'];
+  const models = ['', 'HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1', 'Custom'];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -410,15 +429,33 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
                     )}
                   </div>
                   <div>
+                    <label className="block text-sm font-medium mb-1">Current MFG Stage</label>
+                    <select value={form['Current MFG Stage']} onChange={e => setForm({ ...form, 'Current MFG Stage': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                      {mfgStages.map(s => <option key={s} value={s}>{s || '— Select Stage —'}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Production Start Date</label>
+                    <input type="date" value={form['Production Start']} onChange={e => setForm({ ...form, 'Production Start': e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Target Ship Date</label>
+                    <input type="date" value={form['Target Ship Date']} onChange={e => setForm({ ...form, 'Target Ship Date': e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  <div>
                     <label className="block text-sm font-medium mb-1">MFG Week (1-12)</label>
                     <input type="number" min="1" max="12" value={form['MFG Week']} onChange={e => setForm({ ...form, 'MFG Week': e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
                   </div>
-                </div>
-                <div className="mt-4">
-                  <label className="block text-sm font-medium mb-1">MFG Status</label>
-                  <select value={form['MFG Status']} onChange={e => setForm({ ...form, 'MFG Status': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
-                    {mfgStatuses.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
-                  </select>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">MFG Status (Legacy)</label>
+                    <select value={form['MFG Status']} onChange={e => setForm({ ...form, 'MFG Status': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                      {mfgStatuses.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
             </>
@@ -592,7 +629,7 @@ function DashboardView({ projects, onEdit }) {
               <tr key={p.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(p)}>
                 <td className="px-6 py-4">
                   <div className="font-medium">{p['Project ID']}</div>
-                  <div className="text-sm text-gray-500">{getModelName(p)}</div>
+                  <div className="text-sm text-gray-500">{p['Model'] || p['Unit Type'] || ''}</div>
                 </td>
                 <td className="px-6 py-4">
                   <span className="px-2 py-1 text-xs rounded-full" style={{ backgroundColor: `${stageColors[p.Stage]}20`, color: stageColors[p.Stage] }}>
@@ -648,7 +685,7 @@ function WIPScheduleView({ projects, onUpdateWip }) {
         return {
           id: p['Project ID'] || '',
           customer: p['Status'] || p['Customer (text)'] || p['Customer'] || '',
-          unit: getModelName(p),
+          unit: p['Model'] || p['Unit Type'] || '',
           contract: p['Contract Value'] || 0,
           budget: p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
           wip,
@@ -1020,7 +1057,7 @@ function JobScheduleView({ projects, onEdit }) {
                 <td className="px-6 py-4 font-medium">{p['Project ID']}</td>
                 <td className="px-6 py-4 text-sm text-gray-700">{p['Status'] || p['Customer (text)'] || '—'}</td>
                 <td className="px-6 py-4 text-sm">
-                  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{getModelName(p) || '—'}</span>
+                  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{p['Model'] || p['Unit Type'] || '—'}</span>
                 </td>
                 <td className="px-6 py-4">
                   <span className={`px-2 py-1 text-xs rounded-full ${
@@ -1135,7 +1172,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
             </div>
             <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Status'] || ''}</div>
             <div className="flex items-center justify-between">
-              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{getModelName(projects[0]) || '—'}</span>
+              <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Model'] || '—'}</span>
               {projects[0]['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{projects[0]['MFG Week']}</span>}
             </div>
             {!isSmall && projects[0]['MFG Week'] && (
@@ -1156,7 +1193,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-sm">{p['Project ID']}</span>
-                      <span className="text-xs text-gray-400">{getModelName(p) || '—'}</span>
+                      <span className="text-xs text-gray-400">{p['Model'] || '—'}</span>
                     </div>
                     <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
                   </div>
@@ -1224,7 +1261,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
               <div key={p.id} className="bg-white rounded-lg p-3 border border-red-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                 <div className="font-semibold text-sm">{p['Project ID']}</div>
                 <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
-                <div className="text-xs text-red-600 mt-1">{getModelName(p) || '—'}</div>
+                <div className="text-xs text-red-600 mt-1">{p['Model'] || '—'}</div>
               </div>
             ))}
           </div>
@@ -1283,7 +1320,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                 {productionProjects.filter(p => !p['Bay Assignment']).map(p => (
                   <div key={p.id} className="bg-white rounded-lg p-3 border border-amber-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                     <div className="font-semibold text-sm">{p['Project ID']}</div>
-                    <div className="text-xs text-gray-500">{getModelName(p) || '—'}</div>
+                    <div className="text-xs text-gray-500">{p['Model'] || '—'}</div>
                   </div>
                 ))}
               </div>
@@ -1309,7 +1346,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                       <div className="font-semibold text-gray-900">{p['Project ID']}</div>
                       <div className="text-sm text-gray-500">{p['Status'] || ''}</div>
                       <div className="mt-2 flex items-center justify-between">
-                        <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{getModelName(p) || '—'}</span>
+                        <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{p['Model'] || '—'}</span>
                         <span className="text-xs text-gray-400">{p['Bay Assignment'] || 'No Pos'}</span>
                       </div>
                       {p['MFG Week'] && (
@@ -1366,7 +1403,7 @@ function ProductionSchedulerView({ projects }) {
           if (mfgWeek > 0) { startWeek = -mfgWeek; status = mfgWeek < 12 ? 'in_progress' : 'complete'; }
           else { startWeek = 0; status = 'scheduled'; }
         }
-        return { id: p['Project ID'], name: p['Status'] || '', model: getModelName(p), market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'] };
+        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'] };
       });
   }, [projects]);
 
@@ -1548,7 +1585,7 @@ function CapacityPlanningView({ projects }) {
     const analysis = projects.map(p => {
       const stage = p.Stage;
       const contractValue = p['Contract Value'] || 0;
-      const model = getModelName(p) || 'Unknown';
+      const model = p['Model'] || 'Unknown';
       
       // Estimate modules based on model
       let modules = 1;
@@ -2048,6 +2085,861 @@ function CapacityPlanningView({ projects }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// FLOOR SIMULATOR - Future Floor View & MFG Progress Tracking
+// ══════════════════════════════════════════════════════════════════════════════
+function FloorSimulatorView({ projects, onEdit }) {
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    return d.toISOString().split('T')[0];
+  });
+  const [viewMode, setViewMode] = useState('simulator'); // simulator, progress
+
+  // Get production projects
+  const productionProjects = useMemo(() =>
+    projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics'),
+    [projects]
+  );
+
+  // Calculate project progress and projected positions for selected date
+  const projectAnalysis = useMemo(() => {
+    const targetDate = new Date(selectedDate);
+    const today = new Date();
+    const daysFromNow = Math.floor((targetDate - today) / (1000 * 60 * 60 * 24));
+    
+    return productionProjects.map(p => {
+      const model = (p['Model'] || 'HO3').toUpperCase();
+      const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const currentStageField = p['Current MFG Stage'] || '';
+      const currentStageId = MFG_STAGE_MAP[currentStageField] || 'steel_fab';
+      
+      // Find current stage index
+      const currentStageIndex = MFG_STAGES.findIndex(s => s.id === currentStageId);
+      
+      // Calculate days completed and total
+      let daysCompleted = 0;
+      for (let i = 0; i < currentStageIndex; i++) {
+        daysCompleted += durations[MFG_STAGES[i].id] || 0;
+      }
+      
+      // Add partial progress in current stage based on Production Start date
+      const productionStart = p['Production Start'] ? new Date(p['Production Start']) : null;
+      let daysInCurrentStage = 0;
+      if (productionStart) {
+        const daysSinceStart = Math.floor((today - productionStart) / (1000 * 60 * 60 * 24));
+        // Estimate days in current stage
+        const daysBeforeCurrent = daysCompleted;
+        daysInCurrentStage = Math.max(0, daysSinceStart - daysBeforeCurrent);
+      }
+      
+      const totalDays = durations.total;
+      const progressPercent = Math.min(100, ((daysCompleted + daysInCurrentStage) / totalDays) * 100);
+      
+      // Projected stage on selected date
+      let projectedDaysCompleted = daysCompleted + daysInCurrentStage + daysFromNow;
+      let projectedStageIndex = currentStageIndex;
+      let runningDays = daysCompleted;
+      
+      for (let i = currentStageIndex; i < MFG_STAGES.length; i++) {
+        const stageDuration = durations[MFG_STAGES[i].id] || 0;
+        if (runningDays + stageDuration >= projectedDaysCompleted) {
+          projectedStageIndex = i;
+          break;
+        }
+        runningDays += stageDuration;
+        if (i === MFG_STAGES.length - 1) projectedStageIndex = i;
+      }
+      
+      const projectedStage = MFG_STAGES[Math.min(projectedStageIndex, MFG_STAGES.length - 1)];
+      
+      // Projected location
+      let projectedLocation = p['Bay Assignment'] || '';
+      if (projectedStage.location === 'fab') projectedLocation = '4N'; // Fab bay
+      else if (projectedStage.location === 'outside') projectedLocation = 'OW'; // Outside
+      else if (projectedStage.location === 'flex') projectedLocation = 'OF1'; // Flex
+      
+      // Estimated completion date
+      const remainingDays = totalDays - (daysCompleted + daysInCurrentStage);
+      const estCompletion = new Date(today);
+      estCompletion.setDate(estCompletion.getDate() + remainingDays);
+      
+      return {
+        ...p,
+        model,
+        durations,
+        currentStageId,
+        currentStageIndex,
+        currentStageName: MFG_STAGES[currentStageIndex]?.name || 'Unknown',
+        daysCompleted,
+        daysInCurrentStage,
+        totalDays,
+        progressPercent,
+        projectedStage,
+        projectedStageIndex,
+        projectedLocation,
+        estCompletion,
+        remainingDays,
+        isComplete: projectedDaysCompleted >= totalDays
+      };
+    });
+  }, [productionProjects, selectedDate]);
+
+  // Group by projected location for simulator
+  const projectedFloor = useMemo(() => {
+    const floor = {};
+    POSITION_IDS.forEach(pos => floor[pos] = []);
+    
+    projectAnalysis.forEach(p => {
+      const loc = p.projectedLocation || 'unassigned';
+      if (floor[loc]) {
+        floor[loc].push(p);
+      }
+    });
+    
+    return floor;
+  }, [projectAnalysis]);
+
+  // Bottleneck detection
+  const bottlenecks = useMemo(() => {
+    const issues = [];
+    
+    // Check for overcrowded positions
+    Object.entries(projectedFloor).forEach(([pos, projs]) => {
+      if (projs.length > 2 && !pos.startsWith('O')) {
+        issues.push({
+          severity: 'high',
+          message: `${pos} projected to have ${projs.length} projects`,
+          detail: projs.map(p => p['Project ID']).join(', ')
+        });
+      }
+    });
+    
+    // WFB queue
+    const wfbCount = projectAnalysis.filter(p => p['Bay Assignment'] === 'WFB').length;
+    if (wfbCount > 2) {
+      issues.push({
+        severity: 'medium',
+        message: `${wfbCount} projects waiting for build spot`,
+        detail: 'Consider adjusting production schedule'
+      });
+    }
+    
+    return issues;
+  }, [projectedFloor, projectAnalysis]);
+
+  // MFG Progress Component
+  const MfgProgressCard = ({ project }) => {
+    const analysis = projectAnalysis.find(p => p.id === project.id);
+    if (!analysis) return null;
+    
+    return (
+      <div className="bg-white rounded-xl border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-semibold text-lg">{project['Project ID']}</div>
+            <div className="text-sm text-gray-500">{analysis.model} • {project['Status'] || ''}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-2xl font-bold text-blue-600">{analysis.progressPercent.toFixed(0)}%</div>
+            <div className="text-xs text-gray-400">{analysis.remainingDays} days left</div>
+          </div>
+        </div>
+        
+        {/* Progress bar */}
+        <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-4">
+          <div 
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all"
+            style={{ width: `${analysis.progressPercent}%` }}
+          />
+        </div>
+        
+        {/* Stage progress */}
+        <div className="space-y-2">
+          {MFG_STAGES.map((stage, idx) => {
+            const isCompleted = idx < analysis.currentStageIndex;
+            const isCurrent = idx === analysis.currentStageIndex;
+            const stageDuration = analysis.durations[stage.id] || 0;
+            
+            return (
+              <div key={stage.id} className="flex items-center gap-3">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
+                  isCompleted ? 'bg-emerald-500' : isCurrent ? 'bg-blue-500' : 'bg-gray-200'
+                }`}>
+                  {isCompleted ? (
+                    <Check className="w-3 h-3 text-white" />
+                  ) : isCurrent ? (
+                    <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                  ) : (
+                    <div className="w-2 h-2 bg-gray-400 rounded-full" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className={`text-sm ${isCurrent ? 'font-semibold text-blue-600' : isCompleted ? 'text-gray-500' : 'text-gray-400'}`}>
+                    {stage.name}
+                  </div>
+                </div>
+                <div className="text-xs text-gray-400">{stageDuration}d</div>
+                <div className={`text-xs px-2 py-0.5 rounded ${
+                  isCompleted ? 'bg-emerald-100 text-emerald-700' : 
+                  isCurrent ? 'bg-blue-100 text-blue-700' : 
+                  'bg-gray-100 text-gray-500'
+                }`}>
+                  {isCompleted ? 'Done' : isCurrent ? 'In Progress' : 'Pending'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        
+        <div className="mt-4 pt-4 border-t flex items-center justify-between text-sm">
+          <div>
+            <span className="text-gray-500">Est. Completion:</span>
+            <span className="ml-2 font-medium">{analysis.estCompletion.toLocaleDateString()}</span>
+          </div>
+          <button onClick={() => onEdit(project)} className="text-blue-600 hover:text-blue-800">
+            Edit <Edit2 className="w-3 h-3 inline ml-1" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Floor Simulator</h2>
+          <p className="text-sm text-gray-500">MFG progress tracking & future floor prediction • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+            <button onClick={() => setViewMode('simulator')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'simulator' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+              Floor Simulator
+            </button>
+            <button onClick={() => setViewMode('progress')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'progress' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+              MFG Progress
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Simulator View */}
+      {viewMode === 'simulator' && (
+        <>
+          {/* Date Picker */}
+          <div className="bg-white rounded-xl border p-4">
+            <div className="flex items-center gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">View floor on date:</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="px-4 py-2 border rounded-lg"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                  className="px-3 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
+                >
+                  Today
+                </button>
+                <button 
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 7);
+                    setSelectedDate(d.toISOString().split('T')[0]);
+                  }}
+                  className="px-3 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
+                >
+                  +1 Week
+                </button>
+                <button 
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 30);
+                    setSelectedDate(d.toISOString().split('T')[0]);
+                  }}
+                  className="px-3 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
+                >
+                  +1 Month
+                </button>
+                <button 
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 90);
+                    setSelectedDate(d.toISOString().split('T')[0]);
+                  }}
+                  className="px-3 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200"
+                >
+                  +3 Months
+                </button>
+              </div>
+              <div className="ml-auto text-right">
+                <div className="text-sm text-gray-500">Showing</div>
+                <div className="font-semibold">{new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottleneck Alerts */}
+          {bottlenecks.length > 0 && (
+            <div className="space-y-2">
+              {bottlenecks.map((b, i) => (
+                <div key={i} className={`p-4 rounded-lg flex items-start gap-3 ${b.severity === 'high' ? 'bg-red-50 border border-red-200' : 'bg-amber-50 border border-amber-200'}`}>
+                  <AlertCircle className={`w-5 h-5 mt-0.5 ${b.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />
+                  <div>
+                    <div className={`font-medium ${b.severity === 'high' ? 'text-red-800' : 'text-amber-800'}`}>{b.message}</div>
+                    <div className={`text-sm ${b.severity === 'high' ? 'text-red-600' : 'text-amber-600'}`}>{b.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Projected Floor Layout */}
+          <div className="bg-white rounded-xl border p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">Projected Floor Layout</h3>
+            
+            {/* Stats */}
+            <div className="grid grid-cols-5 gap-4 mb-6">
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold">{projectAnalysis.length}</div>
+                <div className="text-xs text-gray-500">In Production</div>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-blue-600">{projectAnalysis.filter(p => p.projectedStage?.location === 'fab').length}</div>
+                <div className="text-xs text-gray-500">In Fab</div>
+              </div>
+              <div className="bg-emerald-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-emerald-600">{projectAnalysis.filter(p => p.projectedStage?.location === 'build').length}</div>
+                <div className="text-xs text-gray-500">In Build</div>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-purple-600">{projectAnalysis.filter(p => p.isComplete).length}</div>
+                <div className="text-xs text-gray-500">Completed</div>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <div className="text-2xl font-bold text-amber-600">{projectAnalysis.filter(p => p['Bay Assignment'] === 'WFB').length}</div>
+                <div className="text-xs text-gray-500">Waiting</div>
+              </div>
+            </div>
+
+            {/* Floor Grid */}
+            <div className="border-2 border-gray-300 rounded-lg p-4 bg-gray-50">
+              <div className="grid grid-cols-4 gap-4 mb-4">
+                {['BAY 1', 'BAY 2', 'BAY 3', 'BAY 4 (Fab)'].map(bay => (
+                  <div key={bay} className="text-center font-bold text-gray-700">{bay}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map(bay => (
+                  <div key={bay} className="space-y-3">
+                    {['N', 'C', 'S'].map(pos => {
+                      const posId = `${bay}${pos}`;
+                      const projs = projectedFloor[posId] || [];
+                      const position = PLANT_POSITIONS[posId];
+                      
+                      return (
+                        <div
+                          key={posId}
+                          className={`rounded-lg border-2 p-3 min-h-[80px] ${projs.length > 0 ? 'cursor-pointer hover:shadow-lg' : ''}`}
+                          style={{ 
+                            borderColor: projs.length > 0 ? position?.color || '#3B82F6' : '#E5E7EB',
+                            backgroundColor: projs.length > 0 ? `${position?.color || '#3B82F6'}10` : '#FAFAFA'
+                          }}
+                          onClick={() => projs.length === 1 && onEdit(projs[0])}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-sm" style={{ color: position?.color || '#6B7280' }}>{posId}</span>
+                            {projs.length > 1 && <span className="px-1.5 py-0.5 bg-blue-500 text-white text-[10px] rounded-full">{projs.length}</span>}
+                          </div>
+                          {projs.length > 0 ? (
+                            <div className="space-y-1">
+                              {projs.slice(0, 2).map(p => (
+                                <div key={p.id} className="text-xs">
+                                  <div className="font-semibold">{p['Project ID']}</div>
+                                  <div className="text-gray-500">{p.projectedStage?.name}</div>
+                                </div>
+                              ))}
+                              {projs.length > 2 && <div className="text-xs text-gray-400">+{projs.length - 2} more</div>}
+                            </div>
+                          ) : (
+                            <div className="text-center text-gray-400 text-xs py-2">Available</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Project Timeline */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Project Completion Timeline</div>
+            <div className="divide-y">
+              {projectAnalysis
+                .sort((a, b) => a.estCompletion - b.estCompletion)
+                .slice(0, 10)
+                .map(p => (
+                  <div key={p.id} className="px-6 py-3 flex items-center gap-4 hover:bg-gray-50">
+                    <div className="w-24 font-medium">{p['Project ID']}</div>
+                    <div className="w-16 text-sm text-gray-500">{p.model}</div>
+                    <div className="flex-1">
+                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full rounded-full bg-blue-500"
+                          style={{ width: `${p.progressPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="w-20 text-sm text-right">{p.progressPercent.toFixed(0)}%</div>
+                    <div className="w-16 text-sm text-gray-500">{p.remainingDays}d left</div>
+                    <div className="w-28 text-sm text-right font-medium">{p.estCompletion.toLocaleDateString()}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Progress View */}
+      {viewMode === 'progress' && (
+        <div className="grid grid-cols-2 gap-6">
+          {projectAnalysis
+            .sort((a, b) => b.progressPercent - a.progressPercent)
+            .map(p => (
+              <MfgProgressCard key={p.id} project={p} />
+            ))}
+          {projectAnalysis.length === 0 && (
+            <div className="col-span-2 text-center py-12 text-gray-500">
+              No projects in production
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRODUCTION ANALYTICS VIEW - Historical Tracking & Stage Duration Analysis
+// ══════════════════════════════════════════════════════════════════════════════
+function ProductionAnalyticsView({ projects }) {
+  const [viewMode, setViewMode] = useState('overview'); // overview, stages, models, history
+
+  // Stage completion date field names
+  const STAGE_DATE_FIELDS = [
+    { id: 'steel_fab', name: 'Steel Fab', field: 'Steel Fab Complete Date', startField: 'Production Start' },
+    { id: 'sandblast', name: 'Sandblast', field: 'Sandblast Complete Date', startField: 'Steel Fab Complete Date' },
+    { id: 'framing', name: 'Framing', field: 'Framing Complete Date', startField: 'Sandblast Complete Date' },
+    { id: 'mep_rough', name: 'MEP Rough', field: 'MEP Rough Complete Date', startField: 'Framing Complete Date' },
+    { id: 'insulation', name: 'Insulation', field: 'Insulation Complete Date', startField: 'MEP Rough Complete Date' },
+    { id: 'drywall', name: 'Drywall', field: 'Drywall Complete Date', startField: 'Insulation Complete Date' },
+    { id: 'finishes', name: 'Finishes', field: 'Finishes Complete Date', startField: 'Drywall Complete Date' },
+    { id: 'cabinets_trim', name: 'Cabinets/Trim', field: 'Cabinets Trim Complete Date', startField: 'Finishes Complete Date' },
+    { id: 'final_qc', name: 'Final QC', field: 'Final QC Complete Date', startField: 'Cabinets Trim Complete Date' },
+    { id: 'ready_to_ship', name: 'Ship', field: 'Ship Date', startField: 'Final QC Complete Date' },
+  ];
+
+  // Get completed projects with stage dates
+  const completedProjects = useMemo(() => {
+    return projects.filter(p => {
+      const hasShipDate = p['Ship Date'];
+      const hasProductionStart = p['Production Start'];
+      return hasShipDate && hasProductionStart;
+    }).map(p => {
+      const model = (p['Model'] || 'HO3').toUpperCase();
+      const targetDurations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      
+      // Calculate actual days for each stage
+      const stageDurations = {};
+      let totalActualDays = 0;
+      
+      STAGE_DATE_FIELDS.forEach(stage => {
+        const endDate = p[stage.field] ? new Date(p[stage.field]) : null;
+        const startDate = p[stage.startField] ? new Date(p[stage.startField]) : null;
+        
+        if (endDate && startDate) {
+          const days = Math.max(0, Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)));
+          stageDurations[stage.id] = {
+            actual: days,
+            target: targetDurations[stage.id] || 0,
+            variance: days - (targetDurations[stage.id] || 0)
+          };
+          totalActualDays += days;
+        }
+      });
+      
+      const productionStart = new Date(p['Production Start']);
+      const shipDate = new Date(p['Ship Date']);
+      const totalDays = Math.floor((shipDate - productionStart) / (1000 * 60 * 60 * 24));
+      
+      return {
+        ...p,
+        model,
+        targetDurations,
+        stageDurations,
+        totalActualDays: totalDays,
+        totalTargetDays: targetDurations.total,
+        variance: totalDays - targetDurations.total,
+        onTime: totalDays <= targetDurations.total
+      };
+    });
+  }, [projects]);
+
+  // Projects in production (for current tracking)
+  const inProductionProjects = useMemo(() => {
+    return projects.filter(p => p.Stage === 'Production' || p.Stage === 'Logistics');
+  }, [projects]);
+
+  // Calculate averages by model
+  const modelAverages = useMemo(() => {
+    const models = ['HO2', 'HO3', 'HO4', 'HO5', 'HS8', 'SO1'];
+    return models.map(model => {
+      const modelProjects = completedProjects.filter(p => p.model === model);
+      if (modelProjects.length === 0) return { model, count: 0, avgDays: 0, targetDays: MODEL_DURATIONS[model]?.total || 0, variance: 0, onTimeRate: 0 };
+      
+      const avgDays = modelProjects.reduce((s, p) => s + p.totalActualDays, 0) / modelProjects.length;
+      const targetDays = MODEL_DURATIONS[model]?.total || 0;
+      const onTimeCount = modelProjects.filter(p => p.onTime).length;
+      
+      return {
+        model,
+        count: modelProjects.length,
+        avgDays: Math.round(avgDays),
+        targetDays,
+        variance: Math.round(avgDays - targetDays),
+        onTimeRate: Math.round((onTimeCount / modelProjects.length) * 100)
+      };
+    }).filter(m => m.count > 0);
+  }, [completedProjects]);
+
+  // Calculate averages by stage
+  const stageAverages = useMemo(() => {
+    return STAGE_DATE_FIELDS.map(stage => {
+      const projectsWithStage = completedProjects.filter(p => p.stageDurations[stage.id]);
+      if (projectsWithStage.length === 0) return { ...stage, count: 0, avgDays: 0, targetDays: 0, variance: 0 };
+      
+      const avgDays = projectsWithStage.reduce((s, p) => s + p.stageDurations[stage.id].actual, 0) / projectsWithStage.length;
+      const avgTarget = projectsWithStage.reduce((s, p) => s + p.stageDurations[stage.id].target, 0) / projectsWithStage.length;
+      
+      return {
+        ...stage,
+        count: projectsWithStage.length,
+        avgDays: Math.round(avgDays * 10) / 10,
+        targetDays: Math.round(avgTarget * 10) / 10,
+        variance: Math.round((avgDays - avgTarget) * 10) / 10
+      };
+    });
+  }, [completedProjects]);
+
+  // Monthly throughput
+  const monthlyThroughput = useMemo(() => {
+    const months = {};
+    completedProjects.forEach(p => {
+      const shipDate = new Date(p['Ship Date']);
+      const key = `${shipDate.getFullYear()}-${String(shipDate.getMonth() + 1).padStart(2, '0')}`;
+      if (!months[key]) months[key] = { count: 0, totalDays: 0, onTime: 0 };
+      months[key].count++;
+      months[key].totalDays += p.totalActualDays;
+      if (p.onTime) months[key].onTime++;
+    });
+    
+    return Object.entries(months)
+      .map(([key, data]) => ({
+        month: key,
+        label: new Date(key + '-01').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        ...data,
+        avgDays: Math.round(data.totalDays / data.count),
+        onTimeRate: Math.round((data.onTime / data.count) * 100)
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-12); // Last 12 months
+  }, [completedProjects]);
+
+  // Overall stats
+  const overallStats = useMemo(() => {
+    if (completedProjects.length === 0) {
+      return { completed: 0, avgDays: 0, onTimeRate: 0, avgVariance: 0 };
+    }
+    
+    const avgDays = completedProjects.reduce((s, p) => s + p.totalActualDays, 0) / completedProjects.length;
+    const onTimeCount = completedProjects.filter(p => p.onTime).length;
+    const avgVariance = completedProjects.reduce((s, p) => s + p.variance, 0) / completedProjects.length;
+    
+    return {
+      completed: completedProjects.length,
+      avgDays: Math.round(avgDays),
+      onTimeRate: Math.round((onTimeCount / completedProjects.length) * 100),
+      avgVariance: Math.round(avgVariance)
+    };
+  }, [completedProjects]);
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900">Production Analytics</h2>
+          <p className="text-sm text-gray-500">Historical tracking & stage duration analysis • <span className="text-blue-600 font-medium">{completedProjects.length} completed projects</span></p>
+        </div>
+        <div className="flex items-center gap-2 bg-gray-100 rounded-lg p-1">
+          <button onClick={() => setViewMode('overview')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'overview' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            Overview
+          </button>
+          <button onClick={() => setViewMode('stages')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'stages' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            By Stage
+          </button>
+          <button onClick={() => setViewMode('models')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'models' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            By Model
+          </button>
+          <button onClick={() => setViewMode('history')} className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
+            History
+          </button>
+        </div>
+      </div>
+
+      {/* No data message */}
+      {completedProjects.length === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center">
+          <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
+          <h3 className="font-semibold text-amber-800 mb-2">No Historical Data Yet</h3>
+          <p className="text-sm text-amber-600 mb-4">
+            Analytics require completed projects with stage completion dates.
+          </p>
+          <p className="text-xs text-amber-500">
+            Add "Production Start" and "Ship Date" to completed projects to start tracking.
+          </p>
+        </div>
+      )}
+
+      {/* Overview */}
+      {viewMode === 'overview' && completedProjects.length > 0 && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-5 gap-4">
+            <div className="bg-white rounded-xl border p-4">
+              <div className="text-sm text-gray-500 mb-1">Completed</div>
+              <div className="text-3xl font-bold">{overallStats.completed}</div>
+              <div className="text-xs text-gray-400">projects tracked</div>
+            </div>
+            <div className="bg-white rounded-xl border p-4">
+              <div className="text-sm text-gray-500 mb-1">Avg Build Time</div>
+              <div className="text-3xl font-bold">{overallStats.avgDays}</div>
+              <div className="text-xs text-gray-400">work days</div>
+            </div>
+            <div className={`rounded-xl border p-4 ${overallStats.onTimeRate >= 80 ? 'bg-emerald-50 border-emerald-200' : overallStats.onTimeRate >= 60 ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'}`}>
+              <div className="text-sm text-gray-500 mb-1">On-Time Rate</div>
+              <div className={`text-3xl font-bold ${overallStats.onTimeRate >= 80 ? 'text-emerald-600' : overallStats.onTimeRate >= 60 ? 'text-amber-600' : 'text-red-600'}`}>{overallStats.onTimeRate}%</div>
+              <div className="text-xs text-gray-400">vs target</div>
+            </div>
+            <div className={`rounded-xl border p-4 ${overallStats.avgVariance <= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+              <div className="text-sm text-gray-500 mb-1">Avg Variance</div>
+              <div className={`text-3xl font-bold ${overallStats.avgVariance <= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {overallStats.avgVariance > 0 ? '+' : ''}{overallStats.avgVariance}
+              </div>
+              <div className="text-xs text-gray-400">days vs target</div>
+            </div>
+            <div className="bg-blue-50 border-blue-200 rounded-xl border p-4">
+              <div className="text-sm text-gray-500 mb-1">In Production</div>
+              <div className="text-3xl font-bold text-blue-600">{inProductionProjects.length}</div>
+              <div className="text-xs text-gray-400">currently active</div>
+            </div>
+          </div>
+
+          {/* Monthly Throughput Chart */}
+          {monthlyThroughput.length > 0 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <div className="px-6 py-4 border-b font-semibold">Monthly Throughput</div>
+              <div className="p-6">
+                <div className="flex items-end gap-2 h-48">
+                  {monthlyThroughput.map(m => (
+                    <div key={m.month} className="flex-1 flex flex-col items-center">
+                      <div className="text-xs font-medium mb-1">{m.count}</div>
+                      <div 
+                        className="w-full bg-blue-500 rounded-t"
+                        style={{ height: `${(m.count / Math.max(...monthlyThroughput.map(x => x.count))) * 150}px` }}
+                      />
+                      <div className="text-xs text-gray-500 mt-2 -rotate-45 origin-top-left">{m.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Completions */}
+          <div className="bg-white rounded-xl border overflow-hidden">
+            <div className="px-6 py-4 border-b font-semibold">Recent Completions</div>
+            <div className="divide-y">
+              {completedProjects.slice(-10).reverse().map(p => (
+                <div key={p.id} className="px-6 py-3 flex items-center gap-4 hover:bg-gray-50">
+                  <div className="w-24 font-medium">{p['Project ID']}</div>
+                  <div className="w-16 text-sm text-gray-500">{p.model}</div>
+                  <div className="w-24 text-sm">{new Date(p['Ship Date']).toLocaleDateString()}</div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">{p.totalActualDays} days</span>
+                      <span className="text-xs text-gray-400">/ {p.totalTargetDays} target</span>
+                    </div>
+                  </div>
+                  <div className={`px-2 py-1 rounded text-xs font-medium ${p.onTime ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                    {p.onTime ? 'On Time' : `+${p.variance} days`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* By Stage */}
+      {viewMode === 'stages' && completedProjects.length > 0 && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b font-semibold">Average Duration by Stage</div>
+          <div className="p-6 space-y-4">
+            {stageAverages.map(stage => {
+              const maxDays = Math.max(...stageAverages.map(s => Math.max(s.avgDays, s.targetDays)), 1);
+              const actualWidth = (stage.avgDays / maxDays) * 100;
+              const targetWidth = (stage.targetDays / maxDays) * 100;
+              const isOver = stage.variance > 0;
+              
+              return (
+                <div key={stage.id} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{stage.name}</span>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span>Avg: <strong>{stage.avgDays}</strong> days</span>
+                      <span className="text-gray-400">Target: {stage.targetDays}</span>
+                      <span className={`px-2 py-0.5 rounded ${isOver ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {stage.variance > 0 ? '+' : ''}{stage.variance}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="relative h-6 bg-gray-100 rounded">
+                    {/* Target marker */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-0.5 bg-gray-400 z-10"
+                      style={{ left: `${targetWidth}%` }}
+                    />
+                    {/* Actual bar */}
+                    <div 
+                      className={`h-full rounded ${isOver ? 'bg-red-400' : 'bg-emerald-400'}`}
+                      style={{ width: `${actualWidth}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-400">{stage.count} projects measured</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="px-6 py-3 bg-gray-50 border-t text-xs text-gray-500">
+            <span className="inline-block w-3 h-3 bg-gray-400 rounded mr-1" /> = Target duration
+          </div>
+        </div>
+      )}
+
+      {/* By Model */}
+      {viewMode === 'models' && completedProjects.length > 0 && (
+        <div className="grid grid-cols-2 gap-6">
+          {modelAverages.map(m => (
+            <div key={m.model} className="bg-white rounded-xl border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="text-2xl font-bold">{m.model}</div>
+                  <div className="text-sm text-gray-500">{m.count} completed</div>
+                </div>
+                <div className={`text-right px-3 py-1 rounded-lg ${m.onTimeRate >= 80 ? 'bg-emerald-100' : m.onTimeRate >= 60 ? 'bg-amber-100' : 'bg-red-100'}`}>
+                  <div className={`text-xl font-bold ${m.onTimeRate >= 80 ? 'text-emerald-700' : m.onTimeRate >= 60 ? 'text-amber-700' : 'text-red-700'}`}>{m.onTimeRate}%</div>
+                  <div className="text-xs text-gray-500">on time</div>
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Avg Actual</span>
+                  <span className="font-semibold">{m.avgDays} days</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Target</span>
+                  <span>{m.targetDays} days</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Variance</span>
+                  <span className={`font-semibold ${m.variance <= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {m.variance > 0 ? '+' : ''}{m.variance} days
+                  </span>
+                </div>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t">
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${m.variance <= 0 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                    style={{ width: `${Math.min(100, (m.targetDays / m.avgDays) * 100)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>0</span>
+                  <span>{m.avgDays} days avg</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* History */}
+      {viewMode === 'history' && completedProjects.length > 0 && (
+        <div className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-6 py-4 border-b font-semibold">All Completed Projects</div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Start</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ship</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actual</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Target</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Variance</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {completedProjects.map(p => (
+                  <tr key={p.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{p['Project ID']}</td>
+                    <td className="px-4 py-3 text-gray-500">{p.model}</td>
+                    <td className="px-4 py-3 text-sm">{new Date(p['Production Start']).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm">{new Date(p['Ship Date']).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-center font-medium">{p.totalActualDays}</td>
+                    <td className="px-4 py-3 text-center text-gray-500">{p.totalTargetDays}</td>
+                    <td className={`px-4 py-3 text-center font-medium ${p.variance <= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {p.variance > 0 ? '+' : ''}{p.variance}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${p.onTime ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {p.onTime ? 'On Time' : 'Late'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // FINANCIALS VIEW - Merged Budget Summary + P&L
 // ══════════════════════════════════════════════════════════════════════════════
 function FinancialsView({ projects }) {
@@ -2408,7 +3300,7 @@ function ProjectBudgetView({ projects, actuals }) {
         <div className="bg-slate-800 text-white px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xl font-bold">{selectedProject['Project ID']} BUILD - {getModelName(selectedProject) || 'Unknown'}</h3>
+              <h3 className="text-xl font-bold">{selectedProject['Project ID']} BUILD - {selectedProject['Model'] || selectedProject['Unit Type'] || 'Unknown'}</h3>
               <p className="text-slate-300">{selectedProject['Status'] || selectedProject['Customer (text)'] || ''}</p>
             </div>
             <div className="text-right">
@@ -3622,7 +4514,7 @@ function CustomerPortalView({ projects, documents, payments }) {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <div className="text-slate-400 text-sm mb-1">Your Home</div>
-              <h1 className="text-3xl font-bold mb-2">{getModelName(selectedProject) || 'Honomobo Home'}</h1>
+              <h1 className="text-3xl font-bold mb-2">{selectedProject['Model'] || selectedProject['Unit Type'] || 'Honomobo Home'}</h1>
               <div className="flex items-center gap-4 text-slate-300 text-sm">
                 <span>{selectedProject['Site State/Province'] || '—'}</span>
                 <span>•</span>
@@ -3683,7 +4575,7 @@ function CustomerPortalView({ projects, documents, payments }) {
               <h3 className="font-semibold mb-4">Project Details</h3>
               <div className="space-y-3">
                 <div className="flex justify-between"><span className="text-gray-500">Project ID</span><span className="font-medium">{selectedProject['Project ID']}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">Model</span><span>{getModelName(selectedProject) || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Model</span><span>{selectedProject['Model'] || selectedProject['Unit Type'] || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Location</span><span>{selectedProject['Site State/Province'] || '—'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Stage</span><span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded text-sm">{selectedProject.Stage}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Project Manager</span><span>{selectedProject['Project Manager'] || '—'}</span></div>
@@ -4010,7 +4902,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
 
                 {/* Model */}
                 <div className="col-span-1">
-                  <span className="text-sm font-medium">{getModelName(project) || '—'}</span>
+                  <span className="text-sm font-medium">{project['Model'] || project['Unit Type'] || '—'}</span>
                 </div>
 
                 {/* Stage */}
@@ -4104,6 +4996,8 @@ const allNavItems = [
   { id: 'queue', label: 'Production Queue', icon: ListOrdered },
   { id: 'scheduler', label: 'Production Scheduler', icon: Factory },
   { id: 'floor', label: 'Manufacturing', icon: Wrench },
+  { id: 'simulator', label: 'Floor Simulator', icon: Clock },
+  { id: 'analytics', label: 'Production Analytics', icon: TrendingUp },
   { id: 'projectbudget', label: 'Project Budget', icon: Calculator },
   { id: 'pl', label: 'Financials', icon: DollarSign },
   { id: 'drawings', label: 'Drawings', icon: FileText },
@@ -4113,11 +5007,11 @@ const allNavItems = [
 ];
 
 const ROLE_ACCESS = {
-  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'capacity', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
+  admin: ['dashboard', 'investor', 'pipeline', 'kpi', 'design', 'capacity', 'wip', 'jobs', 'queue', 'scheduler', 'floor', 'simulator', 'analytics', 'projectbudget', 'pl', 'drawings', 'deviations', 'sage', 'portal'],
   de_manager: ['dashboard', 'pipeline', 'kpi', 'design', 'jobs', 'drawings', 'deviations'],
-  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'capacity', 'jobs', 'queue', 'scheduler', 'drawings', 'projectbudget', 'portal'],
-  factory: ['floor', 'queue', 'scheduler', 'capacity'],
-  qc: ['floor', 'drawings'],
+  pm: ['dashboard', 'pipeline', 'kpi', 'design', 'capacity', 'jobs', 'queue', 'scheduler', 'simulator', 'analytics', 'drawings', 'projectbudget', 'portal'],
+  factory: ['floor', 'simulator', 'analytics', 'queue', 'scheduler', 'capacity'],
+  qc: ['floor', 'simulator', 'drawings'],
   finance: ['dashboard', 'investor', 'pipeline', 'kpi', 'capacity', 'wip', 'projectbudget', 'pl', 'sage', 'deviations'],
   customer: ['portal'],
 };
@@ -4185,7 +5079,6 @@ export default function App() {
   const [actuals, setActuals] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
-  const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -4213,25 +5106,20 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [projData, docData, paymentData, actualsData, tasksData, teamData, modelsData] = await Promise.all([
+      const [projData, docData, paymentData, actualsData, tasksData, teamData] = await Promise.all([
         airtableAPI.fetchProjects(),
         airtableAPI.fetchDocuments(),
         airtableAPI.fetchPayments(),
         airtableAPI.fetchActuals(),
         airtableAPI.fetchTasks(),
         airtableAPI.fetchTeamMembers(),
-        airtableAPI.fetchModels(),
       ]);
-      // Populate the global modelsLookup for getModelName helper
-      modelsLookup = {};
-      modelsData.forEach(m => { modelsLookup[m.id] = m; });
       setProjects(projData);
       setDocuments(docData);
       setPayments(paymentData);
       setActuals(actualsData);
       setTasks(tasksData);
       setTeamMembers(teamData);
-      setModels(modelsData);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -4270,20 +5158,21 @@ export default function App() {
       if (hasValue(formData['Project Manager'])) {
         cleanedData['Project Manager'] = formData['Project Manager'];
       }
-      // Model / Unit Type - convert to linked record format if models are loaded
+      // Model / Unit Type
       if (hasValue(formData['Model'])) {
-        const modelName = formData['Model'];
-        // Look up model record ID by name
-        const modelRecord = Object.values(modelsLookup).find(m =>
-          m.Name === modelName || m['Model Name'] === modelName
-        );
-        if (modelRecord) {
-          // Send as linked record array
-          cleanedData['Model'] = [modelRecord.id];
-        } else {
-          // If no matching record found, try sending as-is (might be single select)
-          cleanedData['Model'] = modelName;
-        }
+        cleanedData['Model'] = formData['Model'];
+      }
+      // Current MFG Stage (new 10-stage tracking)
+      if (hasValue(formData['Current MFG Stage'])) {
+        cleanedData['Current MFG Stage'] = formData['Current MFG Stage'];
+      }
+      // Production Start Date
+      if (hasValue(formData['Production Start'])) {
+        cleanedData['Production Start'] = formData['Production Start'];
+      }
+      // Target Ship Date
+      if (hasValue(formData['Target Ship Date'])) {
+        cleanedData['Target Ship Date'] = formData['Target Ship Date'];
       }
       
       // Handle numeric fields - convert and only include if valid
@@ -4383,6 +5272,8 @@ export default function App() {
       case 'queue': return <ProductionQueueView projects={projects} onUpdateOrder={handleUpdateProductionOrder} />;
       case 'scheduler': return <ProductionSchedulerView projects={projects} />;
       case 'floor': return <ManufacturingFloorView projects={projects} onEdit={handleEdit} />;
+      case 'simulator': return <FloorSimulatorView projects={projects} onEdit={handleEdit} />;
+      case 'analytics': return <ProductionAnalyticsView projects={projects} />;
       case 'projectbudget': return <ProjectBudgetView projects={projects} actuals={actuals} />;
       case 'pl': return <FinancialsView projects={projects} />;
       case 'drawings': return <DrawingsView projects={projects} documents={documents} onUpdateDoc={handleUpdateDocument} onEdit={handleEdit} />;
@@ -5010,7 +5901,7 @@ function KPIDashboardView({ projects, payments }) {
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium">{item['Project ID'] || item['Name'] || '—'}</td>
                     <td className="px-4 py-2 text-sm text-gray-600">{item['Status'] || item['Customer'] || '—'}</td>
-                    <td className="px-4 py-2 text-sm">{getModelName(item) || item['Type'] || '—'}</td>
+                    <td className="px-4 py-2 text-sm">{item['Model'] || item['Type'] || '—'}</td>
                     <td className="px-4 py-2 text-center text-sm">{getModCount(item)}</td>
                     <td className="px-4 py-2 text-right text-sm">{formatCurrency(item['Gross Margin'] || item['Amount'] || item['Contract Value'] || 0)}</td>
                   </tr>
@@ -5510,7 +6401,7 @@ function PipelineAnalyticsView({ projects }) {
 
   // Get model type
   const getModel = (p) => {
-    const model = getModelName(p);
+    const model = p['Model'] || p['Unit Type'] || '';
     const match = model.match(/(HO2|HO3|HO4|HO5|HS6|HS8|SO1)/i);
     return match ? match[1].toUpperCase() : 'Other';
   };
