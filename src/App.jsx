@@ -1646,8 +1646,235 @@ const getSchedWeekNum = (weekOffset) => { const d = new Date(); const startOfYea
 function ProductionSchedulerView({ projects }) {
   const [viewOffset, setViewOffset] = useState(0);
   const [zoneFilter, setZoneFilter] = useState('all');
+  const [showOptimizer, setShowOptimizer] = useState(false);
+  const [optimizedSchedule, setOptimizedSchedule] = useState(null);
+  const [applyingSchedule, setApplyingSchedule] = useState(false);
+
+  // ── SHOP OPTIMIZER ENGINE ──────────────────────────────────────────────────
+  // Rules:
+  // 1. All builds: Fab (Bay 4) → Build (Bay 1-3) → Storage
+  // 2. Two-story (HS6, HS8): Indoor through Framing → Outdoor to finish → Storage
+  // 3. HS6/HS8 need TWO adjacent indoor build spots (sandblast complete → framing done)
+  // 4. Follow Production Queue order
+  // 5. One unit per position at a time
+  
+  const TWO_STORY_MODELS = ['HS6', 'HS8'];
+  const FAB_SPOTS = ['4N', '4C', '4S'];
+  const BUILD_SPOTS_INDOOR = ['1N', '1C', '1S', '2N', '2C', '2S', '3N', '3C', '3S'];
+  const OUTDOOR_BUILD_SPOTS = ['ON', 'OC', 'OS'];
+  
+  // Adjacent pairs for two-story builds (same bay, adjacent rows)
+  const DOUBLE_SPOT_PAIRS = [
+    ['1N', '1C'], ['1C', '1S'],
+    ['2N', '2C'], ['2C', '2S'],
+    ['3N', '3C'], ['3C', '3S'],
+  ];
+
+  const runOptimizer = () => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
+    // Get queued/unscheduled production projects in queue order
+    const productionProjects = projects
+      .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Permitting')
+      .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
+    
+    // Track position availability (day number when each spot is free)
+    // Start from today = day 0
+    const spotFreeDay = {};
+    [...FAB_SPOTS, ...BUILD_SPOTS_INDOOR, ...OUTDOOR_BUILD_SPOTS, 'STORAGE'].forEach(s => { spotFreeDay[s] = 0; });
+    
+    // Account for currently occupied spots
+    productionProjects.forEach(p => {
+      const pos = p['Bay Assignment'];
+      const startDate = p['Production Start'] ? new Date(p['Production Start']) : null;
+      const currentStage = p['Current MFG Stage'];
+      if (!pos || !startDate) return;
+      
+      const model = (p['Model'] || 'HO3').toUpperCase();
+      const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const stageKey = MFG_STAGE_MAP[currentStage];
+      
+      // Estimate remaining days in current position
+      let remainingDays = 0;
+      if (stageKey) {
+        const stageOrder = Object.keys(durations);
+        const currentIdx = stageOrder.indexOf(stageKey);
+        const isTwoStory = TWO_STORY_MODELS.includes(model);
+        
+        if (isTwoStory && pos.match(/^[123]/) && currentIdx <= 2) {
+          // Two-story indoor: only through framing
+          for (let i = currentIdx; i <= 2 && i < stageOrder.length; i++) {
+            remainingDays += durations[stageOrder[i]] || 0;
+          }
+        } else if (OUTDOOR_BUILD_SPOTS.includes(pos)) {
+          // Outdoor: remaining stages
+          for (let i = currentIdx; i < stageOrder.length; i++) {
+            remainingDays += durations[stageOrder[i]] || 0;
+          }
+        } else {
+          for (let i = currentIdx; i < stageOrder.length; i++) {
+            remainingDays += durations[stageOrder[i]] || 0;
+          }
+        }
+      } else {
+        // Unknown stage, assume full duration remaining
+        remainingDays = (MODEL_DURATIONS[p['Model']?.toUpperCase()] || DEFAULT_DURATIONS).total;
+      }
+      
+      spotFreeDay[pos] = Math.max(spotFreeDay[pos], remainingDays);
+    });
+    
+    // Schedule unassigned projects
+    const unscheduled = productionProjects.filter(p => !p['Bay Assignment'] || !p['Production Start']);
+    const schedule = [];
+    
+    unscheduled.forEach(p => {
+      const model = (p['Model'] || 'HO3').toUpperCase();
+      const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const isTwoStory = TWO_STORY_MODELS.includes(model);
+      
+      // Phase 1: Fab (Bay 4)
+      const fabDays = durations.steel_fab + durations.sandblast;
+      const fabStart = Math.min(...FAB_SPOTS.map(s => spotFreeDay[s]));
+      const fabSpot = FAB_SPOTS.find(s => spotFreeDay[s] === fabStart);
+      const fabEnd = fabStart + fabDays;
+      spotFreeDay[fabSpot] = fabEnd;
+      
+      // Phase 2: Build (Indoor)
+      let buildSpot = null;
+      let buildSpot2 = null;
+      let buildStart = 0;
+      
+      if (isTwoStory) {
+        // Need two adjacent spots available at same time
+        let bestPairStart = Infinity;
+        let bestPair = null;
+        
+        DOUBLE_SPOT_PAIRS.forEach(([a, b]) => {
+          const pairFree = Math.max(spotFreeDay[a], spotFreeDay[b], fabEnd);
+          if (pairFree < bestPairStart) {
+            bestPairStart = pairFree;
+            bestPair = [a, b];
+          }
+        });
+        
+        buildSpot = bestPair[0];
+        buildSpot2 = bestPair[1];
+        buildStart = bestPairStart;
+        
+        // Two-story stays indoor only through framing
+        const indoorDays = durations.framing;
+        spotFreeDay[buildSpot] = buildStart + indoorDays;
+        spotFreeDay[buildSpot2] = buildStart + indoorDays;
+        
+        // Phase 2b: Move to outdoor for remaining build
+        const outdoorStart = buildStart + indoorDays;
+        const outdoorDays = durations.mep_rough + durations.insulation + durations.drywall + 
+                           durations.finishes + durations.cabinets_trim + durations.final_qc + durations.ready_to_ship;
+        const outdoorFree = Math.min(...OUTDOOR_BUILD_SPOTS.map(s => Math.max(spotFreeDay[s], outdoorStart)));
+        const outdoorSpot = OUTDOOR_BUILD_SPOTS.find(s => Math.max(spotFreeDay[s], outdoorStart) === outdoorFree);
+        const outdoorEnd = outdoorFree + outdoorDays;
+        spotFreeDay[outdoorSpot] = outdoorEnd;
+        
+        const totalDays = outdoorEnd - fabStart;
+        const startDate = new Date(now);
+        startDate.setDate(startDate.getDate() + fabStart);
+        const endDate = new Date(now);
+        endDate.setDate(endDate.getDate() + outdoorEnd);
+        
+        schedule.push({
+          projectId: p['Project ID'],
+          airtableId: p.id,
+          model,
+          isTwoStory: true,
+          phases: [
+            { spot: fabSpot, label: 'Fab', startDay: fabStart, endDay: fabEnd, days: fabDays },
+            { spot: `${buildSpot}+${buildSpot2}`, label: 'Indoor Build', startDay: buildStart, endDay: buildStart + indoorDays, days: indoorDays },
+            { spot: outdoorSpot, label: 'Outdoor Build', startDay: outdoorFree, endDay: outdoorEnd, days: outdoorDays },
+          ],
+          suggestedBay: fabSpot,
+          suggestedStart: startDate.toISOString().split('T')[0],
+          totalDays,
+          completionDate: endDate.toISOString().split('T')[0],
+          name: p['Status'] || '',
+        });
+      } else {
+        // Single-story: full build indoor
+        const buildDays = durations.total - fabDays;
+        buildStart = Math.max(Math.min(...BUILD_SPOTS_INDOOR.map(s => spotFreeDay[s])), fabEnd);
+        buildSpot = BUILD_SPOTS_INDOOR.find(s => Math.max(spotFreeDay[s], fabEnd) <= buildStart) 
+                    || BUILD_SPOTS_INDOOR.reduce((best, s) => spotFreeDay[s] < spotFreeDay[best] ? s : best);
+        buildStart = Math.max(spotFreeDay[buildSpot], fabEnd);
+        const buildEnd = buildStart + buildDays;
+        spotFreeDay[buildSpot] = buildEnd;
+        
+        const totalDays = buildEnd - fabStart;
+        const startDate = new Date(now);
+        startDate.setDate(startDate.getDate() + fabStart);
+        const endDate = new Date(now);
+        endDate.setDate(endDate.getDate() + buildEnd);
+        
+        schedule.push({
+          projectId: p['Project ID'],
+          airtableId: p.id,
+          model,
+          isTwoStory: false,
+          phases: [
+            { spot: fabSpot, label: 'Fab', startDay: fabStart, endDay: fabEnd, days: fabDays },
+            { spot: buildSpot, label: 'Indoor Build', startDay: buildStart, endDay: buildEnd, days: buildDays },
+          ],
+          suggestedBay: fabSpot,
+          suggestedStart: startDate.toISOString().split('T')[0],
+          totalDays,
+          completionDate: endDate.toISOString().split('T')[0],
+          name: p['Status'] || '',
+        });
+      }
+    });
+    
+    // Calculate utilization stats
+    const lastDay = Math.max(...Object.values(spotFreeDay));
+    const totalSpotDays = (FAB_SPOTS.length + BUILD_SPOTS_INDOOR.length + OUTDOOR_BUILD_SPOTS.length) * lastDay;
+    const usedSpotDays = schedule.reduce((sum, s) => sum + s.totalDays, 0);
+    
+    setOptimizedSchedule({
+      schedule,
+      stats: {
+        totalJobs: schedule.length,
+        totalDays: lastDay,
+        utilization: totalSpotDays > 0 ? Math.round((usedSpotDays / totalSpotDays) * 100) : 0,
+        firstCompletion: schedule.length > 0 ? schedule[0].completionDate : null,
+        lastCompletion: schedule.length > 0 ? schedule[schedule.length - 1].completionDate : null,
+        twoStoryJobs: schedule.filter(s => s.isTwoStory).length,
+      }
+    });
+    setShowOptimizer(true);
+  };
+
+  const applyOptimizedSchedule = async () => {
+    if (!optimizedSchedule) return;
+    setApplyingSchedule(true);
+    try {
+      for (const item of optimizedSchedule.schedule) {
+        await airtableAPI.updateProject(item.airtableId, {
+          'Production Start': item.suggestedStart,
+          'Bay Assignment': item.suggestedBay,
+        });
+      }
+      alert(`✅ Applied schedule to ${optimizedSchedule.schedule.length} projects. Refreshing...`);
+      window.location.reload();
+    } catch (err) {
+      alert('Error applying schedule: ' + err.message);
+    } finally {
+      setApplyingSchedule(false);
+    }
+  };
 
   const jobs = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
     return projects
       .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics')
       .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999))
@@ -1656,12 +1883,32 @@ function ProductionSchedulerView({ projects }) {
         const market = MARKET_MAP[stateCode] || 'other';
         const position = p['Bay Assignment'] || null;
         const mfgWeek = parseInt(p['MFG Week']) || 0;
+        const prodStartDate = p['Production Start'] ? new Date(p['Production Start']) : null;
+        const modelDurations = MODEL_DURATIONS[p['Model']?.toUpperCase()] || DEFAULT_DURATIONS;
+        const durationWeeks = Math.ceil(modelDurations.total / 5);
+        
         let startWeek = null, status = 'queued';
-        if (position) {
-          if (mfgWeek > 0) { startWeek = -mfgWeek; status = mfgWeek < 12 ? 'in_progress' : 'complete'; }
+        
+        if (prodStartDate) {
+          // Calculate week offset from today based on actual Production Start date
+          const diffMs = prodStartDate.getTime() - now.getTime();
+          startWeek = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+          
+          // Determine status based on where we are relative to start and duration
+          if (startWeek + durationWeeks <= 0) {
+            status = 'complete';
+          } else if (startWeek <= 0) {
+            status = 'in_progress';
+          } else {
+            status = 'scheduled';
+          }
+        } else if (position) {
+          // Has bay but no start date - fall back to old MFG Week logic
+          if (mfgWeek > 0) { startWeek = -mfgWeek; status = mfgWeek < durationWeeks ? 'in_progress' : 'complete'; }
           else { startWeek = 0; status = 'scheduled'; }
         }
-        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'] };
+        
+        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'], prodStartDate, durationWeeks };
       });
   }, [projects]);
 
@@ -1692,14 +1939,144 @@ function ProductionSchedulerView({ projects }) {
           <h2 className="text-lg font-bold text-gray-900">Production Scheduler</h2>
           <p className="text-sm text-gray-500">18 positions • Model-based build durations • <span className="text-blue-600 font-medium">Live from Airtable</span></p>
         </div>
-        <select value={zoneFilter} onChange={e => setZoneFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={runOptimizer}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium"
+          >
+            <Zap className="w-4 h-4" /> Optimize
+          </button>
+          <select value={zoneFilter} onChange={e => setZoneFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
           <option value="all">All Positions (18)</option>
           <option value="indoor">Indoor Only (12)</option>
           <option value="outdoor">Outdoor Only (6)</option>
           <option value="fab">Fabrication (3)</option>
           <option value="build">Build (9)</option>
         </select>
+        </div>
       </div>
+
+      {/* ── OPTIMIZER RESULTS PANEL ──────────────────────────────────────────── */}
+      {showOptimizer && optimizedSchedule && (
+        <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 bg-emerald-100 border-b border-emerald-300 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Zap className="w-5 h-5 text-emerald-700" />
+              <div>
+                <h3 className="font-bold text-emerald-900">Optimized Schedule</h3>
+                <p className="text-xs text-emerald-700">Based on queue order, model durations & shop constraints</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={applyOptimizedSchedule}
+                disabled={applyingSchedule}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium disabled:opacity-50"
+              >
+                {applyingSchedule ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                Apply to Airtable
+              </button>
+              <button onClick={() => setShowOptimizer(false)} className="p-2 text-emerald-700 hover:bg-emerald-200 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-5 gap-4 p-4">
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">Jobs to Schedule</div>
+              <div className="text-2xl font-bold text-emerald-700">{optimizedSchedule.stats.totalJobs}</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">Two-Story Builds</div>
+              <div className="text-2xl font-bold text-purple-600">{optimizedSchedule.stats.twoStoryJobs}</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">Total Span</div>
+              <div className="text-2xl font-bold">{optimizedSchedule.stats.totalDays}<span className="text-sm text-gray-400"> days</span></div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">First Completion</div>
+              <div className="text-lg font-bold">{optimizedSchedule.stats.firstCompletion ? new Date(optimizedSchedule.stats.firstCompletion).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">Last Completion</div>
+              <div className="text-lg font-bold">{optimizedSchedule.stats.lastCompletion ? new Date(optimizedSchedule.stats.lastCompletion).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
+            </div>
+          </div>
+
+          {/* Schedule Table */}
+          <div className="px-4 pb-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-emerald-200">
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">#</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Project</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Model</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Fab Spot</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Build Spot(s)</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Outdoor</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Start</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Complete</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-emerald-800">Days</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-emerald-100">
+                {optimizedSchedule.schedule.map((item, i) => (
+                  <tr key={item.projectId} className="hover:bg-emerald-50/50">
+                    <td className="py-2 px-3 text-gray-400 font-bold">{i + 1}</td>
+                    <td className="py-2 px-3">
+                      <div className="font-semibold">{item.projectId}</div>
+                      <div className="text-xs text-gray-500 truncate max-w-[150px]">{item.name}</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${item.isTwoStory ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                        {item.model} {item.isTwoStory ? '(2-story)' : ''}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                        {item.phases[0].spot}
+                      </span>
+                      <div className="text-[10px] text-gray-400">{item.phases[0].days}d</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                        {item.phases[1].spot}
+                      </span>
+                      <div className="text-[10px] text-gray-400">{item.phases[1].days}d</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      {item.isTwoStory && item.phases[2] ? (
+                        <>
+                          <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                            {item.phases[2].spot}
+                          </span>
+                          <div className="text-[10px] text-gray-400">{item.phases[2].days}d</div>
+                        </>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 text-xs">{new Date(item.suggestedStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    <td className="py-2 px-3 text-xs">{new Date(item.completionDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                    <td className="py-2 px-3 text-right font-medium">{item.totalDays}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Legend */}
+          <div className="px-6 pb-4 flex items-center gap-6 text-xs text-gray-500">
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-amber-200 border border-amber-400" /> Fabrication (Bay 4)</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-blue-200 border border-blue-400" /> Indoor Build (Bay 1-3)</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-purple-200 border border-purple-400" /> Outdoor Build (HS6/HS8)</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-gray-200 border border-gray-400" /> → Storage until ship</div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-5 gap-4">
         <div className="bg-white rounded-xl border p-4"><div className="text-sm text-gray-500 mb-1">In Progress</div><div className="text-3xl font-bold">{stats.inProgress}</div></div>
@@ -1740,23 +2117,40 @@ function ProductionSchedulerView({ projects }) {
               <div className="flex-1 flex relative min-h-[50px]">
                 {weeks.map((w, i) => <div key={i} className={`flex-1 border-r border-gray-100 ${w === 0 ? 'bg-blue-50/50' : ''}`} />)}
                 {positionJobs.map(job => {
-                  const idx = weeks.findIndex(w => w === job.startWeek);
-                  if (idx === -1) return null;
-                  const left = (idx / weeks.length) * 100;
-                  // Use model-specific duration converted to weeks (work days / 5)
-                  const modelDurations = MODEL_DURATIONS[job.model?.toUpperCase()] || DEFAULT_DURATIONS;
-                  const durationWeeks = Math.ceil(modelDurations.total / 5);
-                  const duration = isOutdoor ? 4 : durationWeeks;
+                  const startW = job.startWeek;
+                  const firstWeek = weeks[0];
+                  const lastWeek = weeks[weeks.length - 1];
+                  if (startW > lastWeek || startW < firstWeek - 4) return null;
+                  
+                  const left = ((startW - firstWeek) / weeks.length) * 100;
+                  const duration = isOutdoor ? 4 : job.durationWeeks;
                   const width = (duration / weeks.length) * 100;
-                  const progress = job.mfgWeek / durationWeeks;
+                  
+                  let progress = 0;
+                  if (job.status === 'complete') {
+                    progress = 1;
+                  } else if (job.status === 'in_progress' && job.prodStartDate) {
+                    const now = new Date();
+                    const elapsed = (now - job.prodStartDate) / (7 * 24 * 60 * 60 * 1000);
+                    progress = Math.min(elapsed / job.durationWeeks, 1);
+                  } else if (job.mfgWeek > 0) {
+                    progress = job.mfgWeek / job.durationWeeks;
+                  }
+                  
                   const market = SCHED_MARKETS[job.market] || SCHED_MARKETS.other;
+                  const startLabel = job.prodStartDate ? job.prodStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
                   return (
-                    <div key={job.id} className="absolute top-1 bottom-1 rounded-md overflow-hidden shadow-sm border cursor-pointer hover:shadow-md" style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%`, backgroundColor: `${pos.color}15`, borderColor: pos.color }}>
+                    <div key={job.id} className="absolute top-1 bottom-1 rounded-md overflow-hidden shadow-sm border cursor-pointer hover:shadow-md group" style={{ left: `${Math.max(left, 0)}%`, width: `${Math.min(width, 100 - Math.max(left, 0))}%`, backgroundColor: `${pos.color}15`, borderColor: pos.color }}>
                       <div className="absolute inset-y-0 left-0 opacity-30" style={{ width: `${progress * 100}%`, backgroundColor: pos.color }} />
                       <div className="relative px-2 py-1 flex items-center justify-between h-full">
                         <div className="flex items-center gap-1 min-w-0"><span className="font-semibold text-gray-900 text-xs truncate">{job.id}</span><span className="text-[10px]">{market.icon}</span></div>
                         <span className="text-[10px] text-gray-500 flex-shrink-0">{job.model}</span>
                       </div>
+                      {startLabel && (
+                        <div className="hidden group-hover:block absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10">
+                          Start: {startLabel} • {job.durationWeeks}wk
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1764,6 +2158,58 @@ function ProductionSchedulerView({ projects }) {
             </div>
           );
         })}
+
+        {/* Unassigned rows - jobs with start dates but no bay */}
+        {(() => {
+          const unassignedJobs = jobs.filter(j => !j.position && j.startWeek !== null);
+          if (unassignedJobs.length === 0) return null;
+          return unassignedJobs.map((job, idx) => (
+            <div key={`unassigned-${job.id}`} className="flex items-stretch border-b border-gray-100 bg-amber-50/30">
+              <div className="w-28 flex-shrink-0 p-2 bg-amber-50 border-r flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-400" />
+                <div><span className="font-medium text-sm text-amber-700">TBD</span><div className="text-[10px] text-amber-500">{job.id}</div></div>
+              </div>
+              <div className="flex-1 flex relative min-h-[50px]">
+                {weeks.map((w, i) => <div key={i} className={`flex-1 border-r border-gray-100 ${w === 0 ? 'bg-blue-50/50' : ''}`} />)}
+                {(() => {
+                  const startW = job.startWeek;
+                  const firstWeek = weeks[0];
+                  const lastWeek = weeks[weeks.length - 1];
+                  if (startW > lastWeek || startW < firstWeek - 4) return null;
+                  
+                  const left = ((startW - firstWeek) / weeks.length) * 100;
+                  const width = (job.durationWeeks / weeks.length) * 100;
+                  
+                  let progress = 0;
+                  if (job.status === 'complete') {
+                    progress = 1;
+                  } else if (job.status === 'in_progress' && job.prodStartDate) {
+                    const now = new Date();
+                    const elapsed = (now - job.prodStartDate) / (7 * 24 * 60 * 60 * 1000);
+                    progress = Math.min(elapsed / job.durationWeeks, 1);
+                  }
+                  
+                  const market = SCHED_MARKETS[job.market] || SCHED_MARKETS.other;
+                  const startLabel = job.prodStartDate ? job.prodStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                  return (
+                    <div className="absolute top-1 bottom-1 rounded-md overflow-hidden shadow-sm border-2 border-dashed border-amber-400 cursor-pointer hover:shadow-md group" style={{ left: `${Math.max(left, 0)}%`, width: `${Math.min(width, 100 - Math.max(left, 0))}%`, backgroundColor: '#fef3c720' }}>
+                      <div className="absolute inset-y-0 left-0 opacity-20 bg-amber-400" style={{ width: `${progress * 100}%` }} />
+                      <div className="relative px-2 py-1 flex items-center justify-between h-full">
+                        <div className="flex items-center gap-1 min-w-0"><span className="font-semibold text-amber-800 text-xs truncate">{job.id}</span><span className="text-[10px]">{market.icon}</span></div>
+                        <span className="text-[10px] text-amber-600 flex-shrink-0">{job.model} • No Bay</span>
+                      </div>
+                      {startLabel && (
+                        <div className="hidden group-hover:block absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-10">
+                          Start: {startLabel} • {job.durationWeeks}wk • Needs bay assignment
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          ));
+        })()}
       </div>
 
       {queuedJobs.length > 0 && (
@@ -5896,18 +6342,18 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
   const positions = ['', ...POSITION_IDS];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Production Queue</h2>
-          <p className="text-sm text-gray-500">Drag to reorder • Click edit to set dates & position • {queue.length} active projects</p>
+          <h2 className="text-lg md:text-xl font-bold text-gray-900">Production Queue</h2>
+          <p className="text-xs md:text-sm text-gray-500">{queue.length} active projects</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <select
             value={stageFilter}
             onChange={e => setStageFilter(e.target.value)}
-            className="border rounded-lg px-3 py-2 text-sm"
+            className="border rounded-lg px-3 py-2 text-sm flex-1 sm:flex-none"
           >
             <option value="all">All Stages</option>
             <option value="Assessment">Assessment</option>
@@ -5924,7 +6370,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              Save Order
+              <span className="hidden sm:inline">Save</span>
             </button>
           )}
         </div>
@@ -5933,228 +6379,197 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
       {/* Unsaved Changes Warning */}
       {hasChanges && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-amber-500" />
-          <span className="text-sm text-amber-800">You have unsaved changes. Click "Save Order" to update Airtable.</span>
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          <span className="text-xs md:text-sm text-amber-800">Unsaved changes. Tap Save to update.</span>
         </div>
       )}
 
       {/* Filter Warning */}
       {isFiltered && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-2">
-          <Info className="w-5 h-5 text-blue-500" />
-          <span className="text-sm text-blue-800">Showing filtered view. Numbers show position in full queue. Reorder using "All Stages" filter.</span>
+          <Info className="w-5 h-5 text-blue-500 flex-shrink-0" />
+          <span className="text-xs md:text-sm text-blue-800">Filtered view. Numbers show full queue position.</span>
         </div>
       )}
 
-      {/* Queue List */}
-      <div className="bg-white rounded-xl border overflow-hidden">
-        <div className="bg-gray-50 px-4 py-3 border-b grid grid-cols-12 gap-4 text-xs font-semibold text-gray-500 uppercase">
-          <div className="col-span-1">#</div>
-          <div className="col-span-2">Project</div>
-          <div className="col-span-1">Model</div>
-          <div className="col-span-1">Stage</div>
-          <div className="col-span-1">Bay</div>
-          <div className="col-span-1">MFG Stage</div>
-          <div className="col-span-2">Prod Start</div>
-          <div className="col-span-2">Target Ship</div>
-          <div className="col-span-1 text-right">Actions</div>
-        </div>
+      {/* Queue List - Mobile Cards */}
+      <div className="space-y-2">
+        {filteredQueue.map((project) => {
+          const stageColors = getStageColor(project.Stage);
+          const queuePosition = getQueuePosition(project.id);
+          const queueIndex = queue.findIndex(p => p.id === project.id);
+          const isDragging = draggedItem === queueIndex;
+          const isDragOver = dragOverIndex === queueIndex;
+          const isEditing = editingProject === project.id;
 
-        <div className="divide-y">
-          {filteredQueue.map((project) => {
-            const stageColors = getStageColor(project.Stage);
-            const queuePosition = getQueuePosition(project.id);
-            const queueIndex = queue.findIndex(p => p.id === project.id);
-            const isDragging = draggedItem === queueIndex;
-            const isDragOver = dragOverIndex === queueIndex;
-            const isEditing = editingProject === project.id;
-
-            if (isEditing) {
-              return (
-                <div key={project.id} className="px-4 py-3 bg-blue-50 border-l-4 border-blue-500">
-                  <div className="grid grid-cols-12 gap-4 items-center">
-                    <div className="col-span-1">
-                      <span className="font-bold text-gray-400">{queuePosition}</span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="font-semibold text-gray-900">{project['Project ID']}</span>
-                      <div className="text-xs text-gray-500">{project['Status'] || ''}</div>
-                    </div>
-                    <div className="col-span-1">
-                      <span className="text-sm">{project['Model'] || '—'}</span>
-                    </div>
-                    <div className="col-span-1">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
-                        {project.Stage}
-                      </span>
-                    </div>
-                    <div className="col-span-1">
-                      <select 
-                        value={editForm['Bay Assignment']} 
-                        onChange={e => setEditForm({...editForm, 'Bay Assignment': e.target.value})}
-                        className="w-full text-xs border rounded px-2 py-1"
-                      >
-                        {positions.map(p => <option key={p} value={p}>{p || '—'}</option>)}
-                      </select>
-                    </div>
-                    <div className="col-span-1">
-                      <select 
-                        value={editForm['Current MFG Stage']} 
-                        onChange={e => setEditForm({...editForm, 'Current MFG Stage': e.target.value})}
-                        className="w-full text-xs border rounded px-2 py-1"
-                      >
-                        {mfgStages.map(s => <option key={s} value={s}>{s || '—'}</option>)}
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <input 
-                        type="date" 
-                        value={editForm['Production Start']} 
-                        onChange={e => setEditForm({...editForm, 'Production Start': e.target.value})}
-                        className="w-full text-xs border rounded px-2 py-1"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input 
-                        type="date" 
-                        value={editForm['Target Ship Date']} 
-                        onChange={e => setEditForm({...editForm, 'Target Ship Date': e.target.value})}
-                        className="w-full text-xs border rounded px-2 py-1"
-                      />
-                    </div>
-                    <div className="col-span-1 flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => saveInlineEdit(project.id)}
-                        disabled={saving}
-                        className="p-1.5 text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50"
-                        title="Save"
-                      >
-                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                      </button>
-                      <button
-                        onClick={cancelEditing}
-                        className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
-                        title="Cancel"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+          if (isEditing) {
+            return (
+              <div key={project.id} className="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-bold text-gray-300">{queuePosition}</span>
+                    <div>
+                      <div className="font-semibold text-gray-900">{project['Project ID']}</div>
+                      <div className="text-xs text-gray-500">{project['Model'] || '—'} • {project.Stage}</div>
                     </div>
                   </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => saveInlineEdit(project.id)}
+                      disabled={saving}
+                      className="p-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                    </button>
+                    <button
+                      onClick={cancelEditing}
+                      className="p-2 text-gray-500 hover:text-gray-700 hover:bg-white rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
-              );
-            }
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Bay</label>
+                    <select 
+                      value={editForm['Bay Assignment']} 
+                      onChange={e => setEditForm({...editForm, 'Bay Assignment': e.target.value})}
+                      className="w-full text-sm border rounded-lg px-3 py-2"
+                    >
+                      {positions.map(p => <option key={p} value={p}>{p || '—'}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">MFG Stage</label>
+                    <select 
+                      value={editForm['Current MFG Stage']} 
+                      onChange={e => setEditForm({...editForm, 'Current MFG Stage': e.target.value})}
+                      className="w-full text-sm border rounded-lg px-3 py-2"
+                    >
+                      {mfgStages.map(s => <option key={s} value={s}>{s || '—'}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Prod Start</label>
+                    <input 
+                      type="date" 
+                      value={editForm['Production Start']} 
+                      onChange={e => setEditForm({...editForm, 'Production Start': e.target.value})}
+                      className="w-full text-sm border rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Target Ship</label>
+                    <input 
+                      type="date" 
+                      value={editForm['Target Ship Date']} 
+                      onChange={e => setEditForm({...editForm, 'Target Ship Date': e.target.value})}
+                      className="w-full text-sm border rounded-lg px-3 py-2"
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          }
 
-            return (
-              <div
-                key={project.id}
-                draggable={!isFiltered}
-                onDragStart={e => !isFiltered && handleDragStart(e, queueIndex)}
-                onDragOver={e => !isFiltered && handleDragOver(e, queueIndex)}
-                onDragLeave={handleDragLeave}
-                onDrop={e => !isFiltered && handleDrop(e, queueIndex)}
-                onDragEnd={handleDragEnd}
-                className={`
-                  grid grid-cols-12 gap-4 px-4 py-3 items-center transition-all duration-150
-                  ${!isFiltered ? 'cursor-grab active:cursor-grabbing' : ''}
-                  ${isDragging ? 'opacity-50 bg-blue-50' : ''}
-                  ${isDragOver ? 'border-t-2 border-blue-500 bg-blue-50' : ''}
-                  ${!isDragging && !isDragOver ? 'hover:bg-gray-50' : ''}
-                `}
-              >
-                {/* Order Number */}
-                <div className="col-span-1 flex items-center gap-2">
-                  {!isFiltered && <GripVertical className="w-4 h-4 text-gray-400" />}
-                  <span className="font-bold text-gray-400">{queuePosition}</span>
+          return (
+            <div
+              key={project.id}
+              draggable={!isFiltered}
+              onDragStart={e => !isFiltered && handleDragStart(e, queueIndex)}
+              onDragOver={e => !isFiltered && handleDragOver(e, queueIndex)}
+              onDragLeave={handleDragLeave}
+              onDrop={e => !isFiltered && handleDrop(e, queueIndex)}
+              onDragEnd={handleDragEnd}
+              className={`
+                bg-white rounded-lg border p-4 transition-all duration-150
+                ${!isFiltered ? 'cursor-grab active:cursor-grabbing' : ''}
+                ${isDragging ? 'opacity-50 bg-blue-50 border-blue-300' : ''}
+                ${isDragOver ? 'border-t-4 border-blue-500 bg-blue-50' : ''}
+              `}
+            >
+              {/* Main Row */}
+              <div className="flex items-center gap-3">
+                {/* Position & Drag Handle */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {!isFiltered && <GripVertical className="w-4 h-4 text-gray-300" />}
+                  <span className="text-2xl font-bold text-gray-300 w-8">{queuePosition}</span>
                 </div>
 
-                {/* Project ID */}
-                <div className="col-span-2">
-                  <span className="font-semibold text-gray-900">{project['Project ID']}</span>
-                  <div className="text-xs text-gray-500 truncate">{project['Status'] || ''}</div>
-                </div>
-
-                {/* Model */}
-                <div className="col-span-1">
-                  <span className="text-sm font-medium">{project['Model'] || '—'}</span>
-                </div>
-
-                {/* Stage */}
-                <div className="col-span-1">
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
-                    {project.Stage || '—'}
-                  </span>
-                </div>
-
-                {/* Bay */}
-                <div className="col-span-1">
-                  <span className="text-xs text-gray-600">{project['Bay Assignment'] || '—'}</span>
-                </div>
-
-                {/* MFG Stage */}
-                <div className="col-span-1">
-                  <span className="text-xs text-gray-600">{project['Current MFG Stage'] || '—'}</span>
-                </div>
-
-                {/* Production Start */}
-                <div className="col-span-2">
-                  <span className="text-xs text-gray-600">
-                    {project['Production Start'] ? new Date(project['Production Start']).toLocaleDateString() : '—'}
-                  </span>
-                </div>
-
-                {/* Target Ship */}
-                <div className="col-span-2">
-                  <span className="text-xs text-gray-600">
-                    {project['Target Ship Date'] ? new Date(project['Target Ship Date']).toLocaleDateString() : '—'}
-                  </span>
+                {/* Project Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-900">{project['Project ID']}</span>
+                    <span className="text-sm text-gray-500">{project['Model'] || ''}</span>
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${stageColors.bg} ${stageColors.text}`}>
+                      {project.Stage}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-500 truncate mt-0.5">{project['Status'] || ''}</div>
                 </div>
 
                 {/* Actions */}
-                <div className="col-span-1 flex items-center justify-end gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => startEditing(project)}
-                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-                    title="Edit"
+                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
                   >
-                    <Edit2 className="w-4 h-4" />
+                    <Edit2 className="w-5 h-5" />
                   </button>
                   <button
                     onClick={() => moveItem(project.id, -1)}
                     disabled={queueIndex === 0}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
-                    title="Move up"
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-30"
                   >
-                    <ChevronUp className="w-4 h-4" />
+                    <ChevronUp className="w-5 h-5" />
                   </button>
                   <button
                     onClick={() => moveItem(project.id, 1)}
                     disabled={queueIndex === queue.length - 1}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded disabled:opacity-30"
-                    title="Move down"
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-30"
                   >
-                    <ChevronDown className="w-4 h-4" />
+                    <ChevronDown className="w-5 h-5" />
                   </button>
                 </div>
               </div>
-            );
-          })}
-        </div>
 
-        {filteredQueue.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            No projects in production queue
-          </div>
-        )}
+              {/* Details Row - Only show if has data */}
+              {(project['Bay Assignment'] || project['Current MFG Stage'] || project['Production Start'] || project['Target Ship Date']) && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 pt-2 border-t text-xs text-gray-500">
+                  {project['Bay Assignment'] && (
+                    <span><span className="text-gray-400">Bay:</span> {project['Bay Assignment']}</span>
+                  )}
+                  {project['Current MFG Stage'] && (
+                    <span><span className="text-gray-400">MFG:</span> {project['Current MFG Stage']}</span>
+                  )}
+                  {project['Production Start'] && (
+                    <span><span className="text-gray-400">Start:</span> {new Date(project['Production Start']).toLocaleDateString()}</span>
+                  )}
+                  {project['Target Ship Date'] && (
+                    <span><span className="text-gray-400">Ship:</span> {new Date(project['Target Ship Date']).toLocaleDateString()}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {filteredQueue.length === 0 && (
+        <div className="p-8 text-center text-gray-500 bg-white rounded-lg border">
+          No projects in production queue
+        </div>
+      )}
 
       {/* Help Text */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h4 className="font-semibold text-blue-900 mb-2">How to use</h4>
         <ul className="text-sm text-blue-800 space-y-1">
-          <li>• <strong>Drag & drop</strong> rows to reorder the build sequence</li>
+          <li>• <strong>Drag & drop</strong> cards to reorder the build sequence</li>
           <li>• Use the <strong>arrow buttons</strong> for fine adjustments</li>
-          <li>• Click <strong>Save Order</strong> to update Airtable</li>
-          <li>• All other views will use this order for production planning</li>
+          <li>• Tap <strong>edit (pencil)</strong> to set dates, bay, and MFG stage</li>
+          <li>• Click <strong>Save</strong> to update Airtable</li>
         </ul>
       </div>
     </div>
