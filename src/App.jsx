@@ -1654,14 +1654,25 @@ function ProductionSchedulerView({ projects }) {
   // Rules:
   // 1. All builds: Fab (Bay 4) → Build (Bay 1-3) → Storage
   // 2. Two-story (HS6, HS8): Indoor through Framing → Outdoor to finish → Storage
-  // 3. HS6/HS8 need TWO adjacent indoor build spots (sandblast complete → framing done)
+  // 3. HS6/HS8 need TWO adjacent indoor build spots (3+3 or 4+4 modules)
   // 4. Follow Production Queue order
-  // 5. One unit per position at a time
+  // 5. Each build spot holds up to 5 MODULES (not projects)
+  //    SO1=1, HO2=2, HO3=3, HO4=4, HO5=5, HS6=6(3+3), HS8=8(4+4)
+  // 6. Multiple projects can share a spot simultaneously if modules fit
   
   const TWO_STORY_MODELS = ['HS6', 'HS8'];
   const FAB_SPOTS = ['4N', '4C', '4S'];
   const BUILD_SPOTS_INDOOR = ['1N', '1C', '1S', '2N', '2C', '2S', '3N', '3C', '3S'];
   const OUTDOOR_BUILD_SPOTS = ['ON', 'OC', 'OS'];
+  const MODULES_PER_SPOT = 5;
+  
+  const MODEL_MODULES = {
+    'SO1': 1, 'HO2': 2, 'HO3': 3, 'HO4': 4, 'HO5': 5,
+    'HS6': 6, 'HS8': 8, 'CUSTOM': 3,
+  };
+  
+  // For two-story, how modules split across 2 adjacent spots
+  const TWO_STORY_SPLIT = { 'HS6': [3, 3], 'HS8': [4, 4] };
   
   // Adjacent pairs for two-story builds (same bay, adjacent rows)
   const DOUBLE_SPOT_PAIRS = [
@@ -1674,87 +1685,181 @@ function ProductionSchedulerView({ projects }) {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     
-    // Get queued/unscheduled production projects in queue order
+    // Get production projects in queue order
     const productionProjects = projects
       .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Permitting')
       .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
     
-    // Track position availability (day number when each spot is free)
-    // Start from today = day 0
-    const spotFreeDay = {};
-    [...FAB_SPOTS, ...BUILD_SPOTS_INDOOR, ...OUTDOOR_BUILD_SPOTS, 'STORAGE'].forEach(s => { spotFreeDay[s] = 0; });
+    // ── TIMELINE-BASED CAPACITY TRACKING ──
+    // Track module usage per spot over time: array of {startDay, endDay, modules}
+    const spotTimeline = {};
+    [...FAB_SPOTS, ...BUILD_SPOTS_INDOOR, ...OUTDOOR_BUILD_SPOTS].forEach(s => {
+      spotTimeline[s] = []; // array of bookings: {startDay, endDay, modules, projectId}
+    });
     
-    // Account for currently occupied spots
+    // Get modules used in a spot at a given day
+    const getModulesUsedAtDay = (spot, day) => {
+      return spotTimeline[spot].reduce((sum, booking) => {
+        if (day >= booking.startDay && day < booking.endDay) return sum + booking.modules;
+        return sum;
+      }, 0);
+    };
+    
+    // Get modules used across a range of days (return max usage in that range)
+    const getMaxModulesInRange = (spot, startDay, endDay) => {
+      let maxUsed = 0;
+      // Check at each booking boundary + start
+      const checkDays = new Set([startDay]);
+      spotTimeline[spot].forEach(b => {
+        if (b.startDay >= startDay && b.startDay < endDay) checkDays.add(b.startDay);
+        if (b.endDay >= startDay && b.endDay < endDay) checkDays.add(b.endDay);
+      });
+      checkDays.forEach(d => {
+        maxUsed = Math.max(maxUsed, getModulesUsedAtDay(spot, d));
+      });
+      return maxUsed;
+    };
+    
+    // Find earliest day a spot can accept N modules for D days
+    const findEarliestSlot = (spot, modulesNeeded, durationDays, notBefore) => {
+      let tryDay = notBefore;
+      // Try each day, check if there's room for the full duration
+      for (let attempt = 0; attempt < 2000; attempt++) {
+        let fits = true;
+        // Check every day of the proposed booking
+        for (let d = tryDay; d < tryDay + durationDays; d++) {
+          if (getModulesUsedAtDay(spot, d) + modulesNeeded > MODULES_PER_SPOT) {
+            fits = false;
+            // Jump to when the conflicting booking ends
+            const conflicting = spotTimeline[spot]
+              .filter(b => d >= b.startDay && d < b.endDay && getModulesUsedAtDay(spot, d) + modulesNeeded > MODULES_PER_SPOT)
+              .sort((a, b) => a.endDay - b.endDay);
+            if (conflicting.length > 0) {
+              tryDay = conflicting[0].endDay;
+            } else {
+              tryDay = d + 1;
+            }
+            break;
+          }
+        }
+        if (fits) return tryDay;
+      }
+      return tryDay; // fallback
+    };
+    
+    // Find earliest day two adjacent spots can both accept modules
+    const findEarliestPairSlot = (spotA, spotB, modulesA, modulesB, durationDays, notBefore) => {
+      let tryDay = notBefore;
+      for (let attempt = 0; attempt < 2000; attempt++) {
+        let fits = true;
+        for (let d = tryDay; d < tryDay + durationDays; d++) {
+          if (getModulesUsedAtDay(spotA, d) + modulesA > MODULES_PER_SPOT ||
+              getModulesUsedAtDay(spotB, d) + modulesB > MODULES_PER_SPOT) {
+            fits = false;
+            // Find earliest end of conflicting bookings
+            const conflictsA = spotTimeline[spotA].filter(b => d >= b.startDay && d < b.endDay);
+            const conflictsB = spotTimeline[spotB].filter(b => d >= b.startDay && d < b.endDay);
+            const allConflicts = [...conflictsA, ...conflictsB].sort((a, b) => a.endDay - b.endDay);
+            tryDay = allConflicts.length > 0 ? allConflicts[0].endDay : d + 1;
+            break;
+          }
+        }
+        if (fits) return tryDay;
+      }
+      return tryDay;
+    };
+    
+    // Book modules into a spot
+    const bookSpot = (spot, startDay, endDay, modules, projectId) => {
+      spotTimeline[spot].push({ startDay, endDay, modules, projectId });
+    };
+    
+    // ── ACCOUNT FOR CURRENTLY SCHEDULED PROJECTS ──
     productionProjects.forEach(p => {
       const pos = p['Bay Assignment'];
       const startDate = p['Production Start'] ? new Date(p['Production Start']) : null;
-      const currentStage = p['Current MFG Stage'];
-      if (!pos || !startDate) return;
+      if (!pos || !startDate || !spotTimeline[pos]) return;
       
       const model = (p['Model'] || 'HO3').toUpperCase();
       const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
-      const stageKey = MFG_STAGE_MAP[currentStage];
+      const modules = MODEL_MODULES[model] || 3;
+      const isTwoStory = TWO_STORY_MODELS.includes(model);
       
-      // Estimate remaining days in current position
-      let remainingDays = 0;
+      const dayOffset = Math.round((startDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+      
+      // Estimate remaining days based on current stage
+      const currentStage = p['Current MFG Stage'];
+      const stageKey = MFG_STAGE_MAP[currentStage];
+      let remainingDays = durations.total;
+      
       if (stageKey) {
         const stageOrder = Object.keys(durations);
         const currentIdx = stageOrder.indexOf(stageKey);
-        const isTwoStory = TWO_STORY_MODELS.includes(model);
-        
-        if (isTwoStory && pos.match(/^[123]/) && currentIdx <= 2) {
-          // Two-story indoor: only through framing
-          for (let i = currentIdx; i <= 2 && i < stageOrder.length; i++) {
-            remainingDays += durations[stageOrder[i]] || 0;
-          }
-        } else if (OUTDOOR_BUILD_SPOTS.includes(pos)) {
-          // Outdoor: remaining stages
-          for (let i = currentIdx; i < stageOrder.length; i++) {
-            remainingDays += durations[stageOrder[i]] || 0;
-          }
-        } else {
-          for (let i = currentIdx; i < stageOrder.length; i++) {
-            remainingDays += durations[stageOrder[i]] || 0;
-          }
+        remainingDays = 0;
+        for (let i = currentIdx; i < stageOrder.length; i++) {
+          remainingDays += durations[stageOrder[i]] || 0;
         }
-      } else {
-        // Unknown stage, assume full duration remaining
-        remainingDays = (MODEL_DURATIONS[p['Model']?.toUpperCase()] || DEFAULT_DURATIONS).total;
       }
       
-      spotFreeDay[pos] = Math.max(spotFreeDay[pos], remainingDays);
+      const endDay = dayOffset + remainingDays;
+      
+      if (isTwoStory) {
+        const split = TWO_STORY_SPLIT[model] || [3, 3];
+        bookSpot(pos, dayOffset, endDay, split[0], p['Project ID']);
+        // Try to find adjacent spot
+        const pair = DOUBLE_SPOT_PAIRS.find(([a, b]) => a === pos || b === pos);
+        if (pair) {
+          const adjSpot = pair[0] === pos ? pair[1] : pair[0];
+          bookSpot(adjSpot, dayOffset, endDay, split[1], p['Project ID']);
+        }
+      } else {
+        bookSpot(pos, dayOffset, endDay, isTwoStory ? modules / 2 : modules, p['Project ID']);
+      }
     });
     
-    // Schedule unassigned projects
+    // ── SCHEDULE UNASSIGNED PROJECTS ──
     const unscheduled = productionProjects.filter(p => !p['Bay Assignment'] || !p['Production Start']);
     const schedule = [];
     
     unscheduled.forEach(p => {
       const model = (p['Model'] || 'HO3').toUpperCase();
       const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const modules = MODEL_MODULES[model] || 3;
       const isTwoStory = TWO_STORY_MODELS.includes(model);
       
-      // Phase 1: Fab (Bay 4)
+      // Phase 1: Fab (Bay 4) — modules needed in fab
       const fabDays = durations.steel_fab + durations.sandblast;
-      const fabStart = Math.min(...FAB_SPOTS.map(s => spotFreeDay[s]));
-      const fabSpot = FAB_SPOTS.find(s => spotFreeDay[s] === fabStart);
-      const fabEnd = fabStart + fabDays;
-      spotFreeDay[fabSpot] = fabEnd;
+      let bestFabStart = Infinity;
+      let bestFabSpot = FAB_SPOTS[0];
       
-      // Phase 2: Build (Indoor)
+      FAB_SPOTS.forEach(spot => {
+        const earliest = findEarliestSlot(spot, Math.min(modules, MODULES_PER_SPOT), fabDays, 0);
+        if (earliest < bestFabStart) {
+          bestFabStart = earliest;
+          bestFabSpot = spot;
+        }
+      });
+      
+      const fabEnd = bestFabStart + fabDays;
+      bookSpot(bestFabSpot, bestFabStart, fabEnd, Math.min(modules, MODULES_PER_SPOT), p['Project ID']);
+      
+      // Phase 2: Build
       let buildSpot = null;
       let buildSpot2 = null;
       let buildStart = 0;
       
       if (isTwoStory) {
-        // Need two adjacent spots available at same time
+        const split = TWO_STORY_SPLIT[model] || [3, 3];
+        const indoorDays = durations.framing;
+        
+        // Need two adjacent spots with capacity for split modules
         let bestPairStart = Infinity;
         let bestPair = null;
         
         DOUBLE_SPOT_PAIRS.forEach(([a, b]) => {
-          const pairFree = Math.max(spotFreeDay[a], spotFreeDay[b], fabEnd);
-          if (pairFree < bestPairStart) {
-            bestPairStart = pairFree;
+          const earliest = findEarliestPairSlot(a, b, split[0], split[1], indoorDays, fabEnd);
+          if (earliest < bestPairStart) {
+            bestPairStart = earliest;
             bestPair = [a, b];
           }
         });
@@ -1763,23 +1868,32 @@ function ProductionSchedulerView({ projects }) {
         buildSpot2 = bestPair[1];
         buildStart = bestPairStart;
         
-        // Two-story stays indoor only through framing
-        const indoorDays = durations.framing;
-        spotFreeDay[buildSpot] = buildStart + indoorDays;
-        spotFreeDay[buildSpot2] = buildStart + indoorDays;
+        bookSpot(buildSpot, buildStart, buildStart + indoorDays, split[0], p['Project ID']);
+        bookSpot(buildSpot2, buildStart, buildStart + indoorDays, split[1], p['Project ID']);
         
-        // Phase 2b: Move to outdoor for remaining build
+        // Phase 2b: Outdoor for remaining build
         const outdoorStart = buildStart + indoorDays;
         const outdoorDays = durations.mep_rough + durations.insulation + durations.drywall + 
                            durations.finishes + durations.cabinets_trim + durations.final_qc + durations.ready_to_ship;
-        const outdoorFree = Math.min(...OUTDOOR_BUILD_SPOTS.map(s => Math.max(spotFreeDay[s], outdoorStart)));
-        const outdoorSpot = OUTDOOR_BUILD_SPOTS.find(s => Math.max(spotFreeDay[s], outdoorStart) === outdoorFree);
-        const outdoorEnd = outdoorFree + outdoorDays;
-        spotFreeDay[outdoorSpot] = outdoorEnd;
         
-        const totalDays = outdoorEnd - fabStart;
+        let bestOutdoorStart = Infinity;
+        let bestOutdoorSpot = OUTDOOR_BUILD_SPOTS[0];
+        
+        OUTDOOR_BUILD_SPOTS.forEach(spot => {
+          // Outdoor spots: two-story takes full spot
+          const earliest = findEarliestSlot(spot, MODULES_PER_SPOT, outdoorDays, outdoorStart);
+          if (earliest < bestOutdoorStart) {
+            bestOutdoorStart = earliest;
+            bestOutdoorSpot = spot;
+          }
+        });
+        
+        const outdoorEnd = bestOutdoorStart + outdoorDays;
+        bookSpot(bestOutdoorSpot, bestOutdoorStart, outdoorEnd, MODULES_PER_SPOT, p['Project ID']);
+        
+        const totalDays = outdoorEnd - bestFabStart;
         const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() + fabStart);
+        startDate.setDate(startDate.getDate() + bestFabStart);
         const endDate = new Date(now);
         endDate.setDate(endDate.getDate() + outdoorEnd);
         
@@ -1787,13 +1901,14 @@ function ProductionSchedulerView({ projects }) {
           projectId: p['Project ID'],
           airtableId: p.id,
           model,
+          modules,
           isTwoStory: true,
           phases: [
-            { spot: fabSpot, label: 'Fab', startDay: fabStart, endDay: fabEnd, days: fabDays },
-            { spot: `${buildSpot}+${buildSpot2}`, label: 'Indoor Build', startDay: buildStart, endDay: buildStart + indoorDays, days: indoorDays },
-            { spot: outdoorSpot, label: 'Outdoor Build', startDay: outdoorFree, endDay: outdoorEnd, days: outdoorDays },
+            { spot: bestFabSpot, label: 'Fab', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
+            { spot: `${buildSpot}+${buildSpot2}`, label: 'Indoor (Framing)', startDay: buildStart, endDay: buildStart + indoorDays, days: indoorDays, modules: `${split[0]}+${split[1]}` },
+            { spot: bestOutdoorSpot, label: 'Outdoor Build', startDay: bestOutdoorStart, endDay: outdoorEnd, days: outdoorDays, modules },
           ],
-          suggestedBay: fabSpot,
+          suggestedBay: bestFabSpot,
           suggestedStart: startDate.toISOString().split('T')[0],
           totalDays,
           completionDate: endDate.toISOString().split('T')[0],
@@ -1802,16 +1917,26 @@ function ProductionSchedulerView({ projects }) {
       } else {
         // Single-story: full build indoor
         const buildDays = durations.total - fabDays;
-        buildStart = Math.max(Math.min(...BUILD_SPOTS_INDOOR.map(s => spotFreeDay[s])), fabEnd);
-        buildSpot = BUILD_SPOTS_INDOOR.find(s => Math.max(spotFreeDay[s], fabEnd) <= buildStart) 
-                    || BUILD_SPOTS_INDOOR.reduce((best, s) => spotFreeDay[s] < spotFreeDay[best] ? s : best);
-        buildStart = Math.max(spotFreeDay[buildSpot], fabEnd);
-        const buildEnd = buildStart + buildDays;
-        spotFreeDay[buildSpot] = buildEnd;
         
-        const totalDays = buildEnd - fabStart;
+        let bestBuildStart = Infinity;
+        let bestBuildSpot = BUILD_SPOTS_INDOOR[0];
+        
+        BUILD_SPOTS_INDOOR.forEach(spot => {
+          const earliest = findEarliestSlot(spot, modules, buildDays, fabEnd);
+          if (earliest < bestBuildStart) {
+            bestBuildStart = earliest;
+            bestBuildSpot = spot;
+          }
+        });
+        
+        buildStart = bestBuildStart;
+        buildSpot = bestBuildSpot;
+        const buildEnd = buildStart + buildDays;
+        bookSpot(buildSpot, buildStart, buildEnd, modules, p['Project ID']);
+        
+        const totalDays = buildEnd - bestFabStart;
         const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() + fabStart);
+        startDate.setDate(startDate.getDate() + bestFabStart);
         const endDate = new Date(now);
         endDate.setDate(endDate.getDate() + buildEnd);
         
@@ -1819,12 +1944,13 @@ function ProductionSchedulerView({ projects }) {
           projectId: p['Project ID'],
           airtableId: p.id,
           model,
+          modules,
           isTwoStory: false,
           phases: [
-            { spot: fabSpot, label: 'Fab', startDay: fabStart, endDay: fabEnd, days: fabDays },
-            { spot: buildSpot, label: 'Indoor Build', startDay: buildStart, endDay: buildEnd, days: buildDays },
+            { spot: bestFabSpot, label: 'Fab', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
+            { spot: buildSpot, label: 'Indoor Build', startDay: buildStart, endDay: buildEnd, days: buildDays, modules },
           ],
-          suggestedBay: fabSpot,
+          suggestedBay: bestFabSpot,
           suggestedStart: startDate.toISOString().split('T')[0],
           totalDays,
           completionDate: endDate.toISOString().split('T')[0],
@@ -1833,20 +1959,35 @@ function ProductionSchedulerView({ projects }) {
       }
     });
     
-    // Calculate utilization stats
-    const lastDay = Math.max(...Object.values(spotFreeDay));
-    const totalSpotDays = (FAB_SPOTS.length + BUILD_SPOTS_INDOOR.length + OUTDOOR_BUILD_SPOTS.length) * lastDay;
-    const usedSpotDays = schedule.reduce((sum, s) => sum + s.totalDays, 0);
+    // ── UTILIZATION STATS ──
+    const lastDay = Math.max(1, ...Object.values(spotTimeline).flat().map(b => b.endDay));
+    const totalModuleSlotDays = (FAB_SPOTS.length + BUILD_SPOTS_INDOOR.length) * MODULES_PER_SPOT * lastDay;
+    const usedModuleSlotDays = Object.values(spotTimeline).flat().reduce((sum, b) => sum + (b.modules * (b.endDay - b.startDay)), 0);
+    
+    // Find co-located projects (sharing spots)
+    const coLocated = [];
+    BUILD_SPOTS_INDOOR.forEach(spot => {
+      const bookings = spotTimeline[spot];
+      for (let i = 0; i < bookings.length; i++) {
+        for (let j = i + 1; j < bookings.length; j++) {
+          if (bookings[i].startDay < bookings[j].endDay && bookings[j].startDay < bookings[i].endDay) {
+            coLocated.push({ spot, projects: [bookings[i].projectId, bookings[j].projectId] });
+          }
+        }
+      }
+    });
     
     setOptimizedSchedule({
       schedule,
+      coLocated,
       stats: {
         totalJobs: schedule.length,
         totalDays: lastDay,
-        utilization: totalSpotDays > 0 ? Math.round((usedSpotDays / totalSpotDays) * 100) : 0,
+        utilization: totalModuleSlotDays > 0 ? Math.round((usedModuleSlotDays / totalModuleSlotDays) * 100) : 0,
         firstCompletion: schedule.length > 0 ? schedule[0].completionDate : null,
         lastCompletion: schedule.length > 0 ? schedule[schedule.length - 1].completionDate : null,
         twoStoryJobs: schedule.filter(s => s.isTwoStory).length,
+        sharedSpots: coLocated.length,
       }
     });
     setShowOptimizer(true);
@@ -1983,25 +2124,29 @@ function ProductionSchedulerView({ projects }) {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-5 gap-4 p-4">
+          <div className="grid grid-cols-6 gap-3 p-4">
             <div className="bg-white rounded-lg p-3 border border-emerald-200">
               <div className="text-xs text-gray-500">Jobs to Schedule</div>
               <div className="text-2xl font-bold text-emerald-700">{optimizedSchedule.stats.totalJobs}</div>
             </div>
             <div className="bg-white rounded-lg p-3 border border-emerald-200">
-              <div className="text-xs text-gray-500">Two-Story Builds</div>
+              <div className="text-xs text-gray-500">Two-Story</div>
               <div className="text-2xl font-bold text-purple-600">{optimizedSchedule.stats.twoStoryJobs}</div>
+            </div>
+            <div className="bg-white rounded-lg p-3 border border-emerald-200">
+              <div className="text-xs text-gray-500">Shared Spots</div>
+              <div className="text-2xl font-bold text-blue-600">{optimizedSchedule.stats.sharedSpots}</div>
             </div>
             <div className="bg-white rounded-lg p-3 border border-emerald-200">
               <div className="text-xs text-gray-500">Total Span</div>
               <div className="text-2xl font-bold">{optimizedSchedule.stats.totalDays}<span className="text-sm text-gray-400"> days</span></div>
             </div>
             <div className="bg-white rounded-lg p-3 border border-emerald-200">
-              <div className="text-xs text-gray-500">First Completion</div>
+              <div className="text-xs text-gray-500">First Complete</div>
               <div className="text-lg font-bold">{optimizedSchedule.stats.firstCompletion ? new Date(optimizedSchedule.stats.firstCompletion).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
             </div>
             <div className="bg-white rounded-lg p-3 border border-emerald-200">
-              <div className="text-xs text-gray-500">Last Completion</div>
+              <div className="text-xs text-gray-500">Last Complete</div>
               <div className="text-lg font-bold">{optimizedSchedule.stats.lastCompletion ? new Date(optimizedSchedule.stats.lastCompletion).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}</div>
             </div>
           </div>
@@ -2014,6 +2159,7 @@ function ProductionSchedulerView({ projects }) {
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">#</th>
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Project</th>
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Model</th>
+                  <th className="text-center py-2 px-3 text-xs font-semibold text-emerald-800">Mods</th>
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Fab Spot</th>
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Build Spot(s)</th>
                   <th className="text-left py-2 px-3 text-xs font-semibold text-emerald-800">Outdoor</th>
@@ -2035,17 +2181,20 @@ function ProductionSchedulerView({ projects }) {
                         {item.model} {item.isTwoStory ? '(2-story)' : ''}
                       </span>
                     </td>
+                    <td className="py-2 px-3 text-center">
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-700">{item.modules}</span>
+                    </td>
                     <td className="py-2 px-3">
                       <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
                         {item.phases[0].spot}
                       </span>
-                      <div className="text-[10px] text-gray-400">{item.phases[0].days}d</div>
+                      <div className="text-[10px] text-gray-400">{item.phases[0].days}d • {item.phases[0].modules}mod</div>
                     </td>
                     <td className="py-2 px-3">
                       <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
                         {item.phases[1].spot}
                       </span>
-                      <div className="text-[10px] text-gray-400">{item.phases[1].days}d</div>
+                      <div className="text-[10px] text-gray-400">{item.phases[1].days}d • {item.phases[1].modules}mod</div>
                     </td>
                     <td className="py-2 px-3">
                       {item.isTwoStory && item.phases[2] ? (
@@ -2068,12 +2217,30 @@ function ProductionSchedulerView({ projects }) {
             </table>
           </div>
 
+          {/* Shared Spots Info */}
+          {optimizedSchedule.coLocated && optimizedSchedule.coLocated.length > 0 && (
+            <div className="px-6 pb-3">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="text-xs font-semibold text-blue-800 mb-2 flex items-center gap-2"><Users className="w-4 h-4" /> Shared Build Spots (multiple projects in same position)</div>
+                <div className="flex flex-wrap gap-2">
+                  {optimizedSchedule.coLocated.map((cl, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-blue-200 rounded text-xs">
+                      <span className="font-medium text-blue-700">{cl.spot}:</span>
+                      <span className="text-gray-600">{cl.projects.join(' + ')}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Legend */}
-          <div className="px-6 pb-4 flex items-center gap-6 text-xs text-gray-500">
+          <div className="px-6 pb-4 flex flex-wrap items-center gap-4 text-xs text-gray-500">
             <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-amber-200 border border-amber-400" /> Fabrication (Bay 4)</div>
             <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-blue-200 border border-blue-400" /> Indoor Build (Bay 1-3)</div>
             <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-purple-200 border border-purple-400" /> Outdoor Build (HS6/HS8)</div>
-            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-gray-200 border border-gray-400" /> → Storage until ship</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 rounded bg-gray-200 border border-gray-400" /> → Storage</div>
+            <div className="border-l pl-4 text-gray-400">5 modules max per spot • SO1=1 HO2=2 HO3=3 HO4=4 HO5=5 HS6=3+3 HS8=4+4</div>
           </div>
         </div>
       )}
