@@ -178,6 +178,10 @@ const airtableAPI = {
       body: JSON.stringify({ fields })
     });
     const data = await res.json();
+    if (data.error) {
+      console.error('Airtable create error:', data.error);
+      throw new Error(data.error.message || 'Failed to create project');
+    }
     return { id: data.id, ...data.fields };
   },
   async updateProject(id, fields) {
@@ -472,7 +476,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'Project ID': project?.['Project ID'] || '',
     'Project Name': project?.['Project Name'] || '',
     'Stage': project?.['Stage'] || 'Assessment',
-    'Status': project?.['Status'] || '',
+    'Name': project?.['Name'] || '',
     'Contract Value': project?.['Contract Value'] || 0,
     'Bay Assignment': project?.['Bay Assignment'] || '',
     'MFG Week': project?.['MFG Week'] || '',
@@ -542,7 +546,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Customer Name</label>
-            <input type="text" value={form['Status']} onChange={e => setForm({ ...form, 'Status': e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g., HOLLAND" />
+            <input type="text" value={form['Name']} onChange={e => setForm({ ...form, 'Name': e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g., HOLLAND" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -848,7 +852,7 @@ function DashboardView({ projects, onEdit }) {
                 </td>
                 <td className="px-6 py-4 text-right font-medium">{formatCurrency(p['Contract Value'])}</td>
                 <td className="px-6 py-4">
-                  <span className="text-sm text-gray-600">{p['Status'] || p['Customer (text)'] || '—'}</span>
+                  <span className="text-sm text-gray-600">{p['Name'] || p['Customer (text)'] || '—'}</span>
                 </td>
               </tr>
             ))}
@@ -894,7 +898,7 @@ function WIPScheduleView({ projects, onUpdateWip }) {
         
         return {
           id: p['Project ID'] || '',
-          customer: p['Status'] || p['Customer (text)'] || p['Customer'] || '',
+          customer: p['Name'] || p['Customer (text)'] || p['Customer'] || '',
           unit: p['Model'] || p['Unit Type'] || '',
           contract: p['Contract Value'] || 0,
           budget: p['MFG Budget'] || p['Budget'] || Math.round((p['Contract Value'] || 0) * 0.7),
@@ -1175,7 +1179,7 @@ function JobScheduleView({ projects, onEdit }) {
       const term = searchTerm.toLowerCase();
       result = result.filter(p =>
         p['Project ID']?.toLowerCase().includes(term) ||
-        p['Status']?.toLowerCase().includes(term) ||
+        p['Name']?.toLowerCase().includes(term) ||
         p['Customer (text)']?.toLowerCase().includes(term)
       );
     }
@@ -1265,7 +1269,7 @@ function JobScheduleView({ projects, onEdit }) {
             {filteredProjects.map(p => (
               <tr key={p.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onEdit(p)}>
                 <td className="px-6 py-4 font-medium">{p['Project ID']}</td>
-                <td className="px-6 py-4 text-sm text-gray-700">{p['Status'] || p['Customer (text)'] || '—'}</td>
+                <td className="px-6 py-4 text-sm text-gray-700">{p['Name'] || p['Customer (text)'] || '—'}</td>
                 <td className="px-6 py-4 text-sm">
                   <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{p['Model'] || p['Unit Type'] || '—'}</span>
                 </td>
@@ -1385,7 +1389,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
               {projects[0]['Project ID']}
               {hasMultiple && !isSmall && <span className="text-gray-400 font-normal"> +{projects.length - 1}</span>}
             </div>
-            <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Status'] || ''}</div>
+            <div className={`text-gray-500 truncate ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Name'] || ''}</div>
             <div className="flex items-center justify-between">
               <span className={`px-1.5 py-0.5 bg-gray-200 text-gray-700 rounded ${isSmall ? 'text-[10px]' : 'text-xs'}`}>{projects[0]['Model'] || '—'}</span>
               {projects[0]['MFG Week'] && <span className={`text-gray-400 ${isSmall ? 'text-[10px]' : 'text-xs'}`}>W{projects[0]['MFG Week']}</span>}
@@ -1410,7 +1414,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                       <span className="font-medium text-sm">{p['Project ID']}</span>
                       <span className="text-xs text-gray-400">{p['Model'] || '—'}</span>
                     </div>
-                    <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
+                    <div className="text-xs text-gray-500 truncate">{p['Name'] || ''}</div>
                   </div>
                 ))}
               </div>
@@ -1496,7 +1500,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
             {productionProjects.filter(p => p['Bay Assignment'] === 'WFB').map(p => (
               <div key={p.id} className="bg-white rounded-lg p-3 border border-red-200 cursor-pointer hover:shadow-md" onClick={() => onEdit(p)}>
                 <div className="font-semibold text-sm">{p['Project ID']}</div>
-                <div className="text-xs text-gray-500 truncate">{p['Status'] || ''}</div>
+                <div className="text-xs text-gray-500 truncate">{p['Name'] || ''}</div>
                 <div className="text-xs text-red-600 mt-1">{p['Model'] || '—'}</div>
               </div>
             ))}
@@ -1602,7 +1606,7 @@ function ManufacturingFloorView({ projects, onEdit }) {
                   {stageProjects.length === 0 ? <div className="text-center py-8 text-gray-400 text-sm">No projects</div> : stageProjects.map(p => (
                     <div key={p.id} onClick={() => onEdit(p)} className="bg-gray-50 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow border border-gray-100">
                       <div className="font-semibold text-gray-900">{p['Project ID']}</div>
-                      <div className="text-sm text-gray-500">{p['Status'] || ''}</div>
+                      <div className="text-sm text-gray-500">{p['Name'] || ''}</div>
                       <div className="mt-2 flex items-center justify-between">
                         <span className="px-2 py-0.5 bg-gray-200 text-gray-700 text-xs rounded">{p['Model'] || '—'}</span>
                         <span className="text-xs text-gray-400">{p['Bay Assignment'] || 'No Pos'}</span>
@@ -1912,7 +1916,7 @@ function ProductionSchedulerView({ projects }) {
           suggestedStart: startDate.toISOString().split('T')[0],
           totalDays,
           completionDate: endDate.toISOString().split('T')[0],
-          name: p['Status'] || '',
+          name: p['Name'] || '',
         });
       } else {
         // Single-story: full build indoor
@@ -1954,7 +1958,7 @@ function ProductionSchedulerView({ projects }) {
           suggestedStart: startDate.toISOString().split('T')[0],
           totalDays,
           completionDate: endDate.toISOString().split('T')[0],
-          name: p['Status'] || '',
+          name: p['Name'] || '',
         });
       }
     });
@@ -2049,7 +2053,7 @@ function ProductionSchedulerView({ projects }) {
           else { startWeek = 0; status = 'scheduled'; }
         }
         
-        return { id: p['Project ID'], name: p['Status'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'], prodStartDate, durationWeeks };
+        return { id: p['Project ID'], name: p['Name'] || '', model: p['Model'] || '', market, position, startWeek, status, mfgWeek, airtableId: p.id, prodOrder: p['Production Order'], prodStartDate, durationWeeks };
       });
   }, [projects]);
 
@@ -3110,7 +3114,7 @@ function FloorSimulatorView({ projects, onEdit }) {
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="font-semibold text-lg">{project['Project ID']}</div>
-            <div className="text-sm text-gray-500">{analysis.model} • {project['Status'] || ''}</div>
+            <div className="text-sm text-gray-500">{analysis.model} • {project['Name'] || ''}</div>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold text-blue-600">{analysis.progressPercent.toFixed(0)}%</div>
@@ -4054,7 +4058,7 @@ function FinancialManagementView({ projects, changeOrders, budgetLineItems, invo
     const term = searchTerm.toLowerCase();
     return projects.filter(p => 
       (p['Project ID'] || '').toLowerCase().includes(term) ||
-      (p['Status'] || '').toLowerCase().includes(term)
+      (p['Name'] || '').toLowerCase().includes(term)
     );
   }, [projects, searchTerm]);
 
@@ -4205,7 +4209,7 @@ function FinancialManagementView({ projects, changeOrders, budgetLineItems, invo
             >
               <option value="">All Projects</option>
               {filteredProjects.map(p => (
-                <option key={p.id} value={p.id}>{p['Project ID']} - {p['Status'] || 'No Name'}</option>
+                <option key={p.id} value={p.id}>{p['Project ID']} - {p['Name'] || 'No Name'}</option>
               ))}
             </select>
           </div>
@@ -4743,7 +4747,7 @@ function ProjectBudgetView({ projects, actuals }) {
     const term = searchTerm.toLowerCase();
     return activeProjects.filter(p => 
       p['Project ID']?.toLowerCase().includes(term) ||
-      (p['Status'] || p['Customer (text)'] || '').toLowerCase().includes(term)
+      (p['Name'] || p['Customer (text)'] || '').toLowerCase().includes(term)
     );
   }, [activeProjects, searchTerm]);
 
@@ -4957,7 +4961,7 @@ function ProjectBudgetView({ projects, actuals }) {
           >
             {filteredProjects.map(p => (
               <option key={p.id} value={p.id}>
-                {p['Project ID']} - {p['Status'] || p['Customer (text)'] || 'Unknown'}
+                {p['Project ID']} - {p['Name'] || p['Customer (text)'] || 'Unknown'}
               </option>
             ))}
           </select>
@@ -4970,7 +4974,7 @@ function ProjectBudgetView({ projects, actuals }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-xl font-bold">{selectedProject['Project ID']} BUILD - {selectedProject['Model'] || selectedProject['Unit Type'] || 'Unknown'}</h3>
-              <p className="text-slate-300">{selectedProject['Status'] || selectedProject['Customer (text)'] || ''}</p>
+              <p className="text-slate-300">{selectedProject['Name'] || selectedProject['Customer (text)'] || ''}</p>
             </div>
             <div className="text-right">
               <div className="text-slate-300 text-sm">Builds Income Summary</div>
@@ -5107,7 +5111,7 @@ function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
       result = result.filter(d => d['Category'] === categoryFilter);
     }
     if (statusFilter !== 'all') {
-      result = result.filter(d => d['Status'] === statusFilter);
+      result = result.filter(d => d['Name'] === statusFilter);
     }
     if (selectedProjectId !== 'all') {
       result = result.filter(d => 
@@ -5121,9 +5125,9 @@ function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
 
   const stats = useMemo(() => ({
     total: (documents || []).length,
-    approved: (documents || []).filter(d => d['Status'] === 'Approved').length,
-    inReview: (documents || []).filter(d => d['Status'] === 'In Review').length,
-    draft: (documents || []).filter(d => d['Status'] === 'Draft').length,
+    approved: (documents || []).filter(d => d['Name'] === 'Approved').length,
+    inReview: (documents || []).filter(d => d['Name'] === 'In Review').length,
+    draft: (documents || []).filter(d => d['Name'] === 'Draft').length,
   }), [documents]);
 
   const projectOptions = useMemo(() => {
@@ -5259,8 +5263,8 @@ function DrawingsView({ projects, documents, onUpdateDoc, onEdit }) {
                   <td className="px-4 py-3 text-sm text-gray-600">{doc['Type'] || '—'}</td>
                   <td className="px-4 py-3 text-center text-sm">{doc['Current Rev'] || '1'}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(doc['Status'])}`}>
-                      {doc['Status'] || 'Draft'}
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(doc['Name'])}`}>
+                      {doc['Name'] || 'Draft'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
@@ -5301,7 +5305,7 @@ function DeviationsView({ projects, onEdit }) {
         devs.push({
           id: `${p.id}-dev`,
           projectId: p['Project ID'],
-          customer: p['Status'] || p['Customer (text)'] || '',
+          customer: p['Name'] || p['Customer (text)'] || '',
           type: p['Deviation Type'] || 'Scope Change',
           description: p['Deviation Description'] || p['Change Order'] || p['Scope Change'] || '',
           amount: p['Deviation Amount'] || p['Change Order Amount'] || 0,
@@ -6149,7 +6153,7 @@ function CustomerPortalView({ projects, documents, payments }) {
 
   const portalStage = STAGE_TO_PORTAL[selectedProject.Stage] || 'design';
   const currentStageIndex = PORTAL_STAGES.findIndex(s => s.id === portalStage);
-  const customerName = selectedProject['Status'] || selectedProject['Customer (text)'] || 'Customer';
+  const customerName = selectedProject['Name'] || selectedProject['Customer (text)'] || 'Customer';
 
   return (
     <div className="min-h-screen bg-gray-50 -m-6 -mt-4">
@@ -6282,7 +6286,7 @@ function CustomerPortalView({ projects, documents, payments }) {
                       <FileText className="w-5 h-5 text-gray-400" />
                       <div>
                         <div className="font-medium">{doc['Name'] || doc['Document Name'] || 'Document'}</div>
-                        <div className="text-sm text-gray-500">{doc['Type'] || ''} • {doc['Status'] || 'Draft'}</div>
+                        <div className="text-sm text-gray-500">{doc['Type'] || ''} • {doc['Name'] || 'Draft'}</div>
                       </div>
                     </div>
                     {doc['URL'] && <a href={doc['URL']} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-600 hover:bg-blue-50 rounded"><Download className="w-4 h-4" /></a>}
@@ -6315,8 +6319,8 @@ function CustomerPortalView({ projects, documents, payments }) {
                       <td className="px-6 py-4 text-sm text-gray-500">{p['Due Date'] || '—'}</td>
                       <td className="px-6 py-4 text-right font-medium">{formatCurrency(p['Amount'])}</td>
                       <td className="px-6 py-4 text-center">
-                        <span className={`px-2 py-1 text-xs rounded-full ${p['Status'] === 'Paid' ? 'bg-emerald-100 text-emerald-700' : p['Status'] === 'Due' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'}`}>
-                          {p['Status'] || 'Pending'}
+                        <span className={`px-2 py-1 text-xs rounded-full ${p['Name'] === 'Paid' ? 'bg-emerald-100 text-emerald-700' : p['Name'] === 'Due' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {p['Name'] || 'Pending'}
                         </span>
                       </td>
                     </tr>
@@ -6673,7 +6677,7 @@ function ProductionQueueView({ projects, onUpdateOrder }) {
                       {project.Stage}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 truncate mt-0.5">{project['Status'] || ''}</div>
+                  <div className="text-xs text-gray-500 truncate mt-0.5">{project['Name'] || ''}</div>
                 </div>
 
                 {/* Actions */}
@@ -6930,8 +6934,8 @@ export default function App() {
       if (hasValue(formData['Project Name'])) {
         cleanedData['Project Name'] = formData['Project Name'];
       }
-      if (hasValue(formData['Status'])) {
-        cleanedData['Status'] = formData['Status'];
+      if (hasValue(formData['Name'])) {
+        cleanedData['Name'] = formData['Name'];
       }
       if (hasValue(formData['Bay Assignment'])) {
         cleanedData['Bay Assignment'] = formData['Bay Assignment'];
@@ -7321,7 +7325,7 @@ function KPIDashboardView({ projects, payments }) {
     // Deposits Received
     const depositsReceived = (payments || []).filter(p => 
       (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
-      p['Status'] === 'Paid' &&
+      p['Name'] === 'Paid' &&
       isInMonth(p['Date'] || p['Paid Date'], month, year)
     );
     values.deposits = depositsReceived.length;
@@ -7343,7 +7347,7 @@ function KPIDashboardView({ projects, payments }) {
 
     // Cash Collected
     const cashCollected = (payments || []).filter(p => 
-      p['Status'] === 'Paid' &&
+      p['Name'] === 'Paid' &&
       isInMonth(p['Date'] || p['Paid Date'], month, year)
     );
     values.cash_collected = cashCollected.reduce((sum, p) => sum + (p['Amount'] || 0), 0);
@@ -7372,7 +7376,7 @@ function KPIDashboardView({ projects, payments }) {
     details.permits_approved = projects.filter(p => isInMonth(p['Permit Approved Date'], selectedMonth, selectedYear));
     details.deposits = (payments || []).filter(p => 
       (p['Type'] === 'Deposit' || p['Milestone']?.includes('Deposit')) &&
-      p['Status'] === 'Paid' &&
+      p['Name'] === 'Paid' &&
       isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
     );
     details.sales_margin = details.de_contracts;
@@ -7381,7 +7385,7 @@ function KPIDashboardView({ projects, payments }) {
     details.invoicing_mfg = [];
     details.invoicing_corp = [];
     details.cash_collected = (payments || []).filter(p => 
-      p['Status'] === 'Paid' &&
+      p['Name'] === 'Paid' &&
       isInMonth(p['Date'] || p['Paid Date'], selectedMonth, selectedYear)
     );
 
@@ -7716,7 +7720,7 @@ function KPIDashboardView({ projects, payments }) {
                 {(calculateKpiValues.details[drilldownKpi] || []).slice(0, 10).map((item, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium">{item['Project ID'] || item['Name'] || '—'}</td>
-                    <td className="px-4 py-2 text-sm text-gray-600">{item['Status'] || item['Customer'] || '—'}</td>
+                    <td className="px-4 py-2 text-sm text-gray-600">{item['Name'] || item['Customer'] || '—'}</td>
                     <td className="px-4 py-2 text-sm">{item['Model'] || item['Type'] || '—'}</td>
                     <td className="px-4 py-2 text-center text-sm">{getModCount(item)}</td>
                     <td className="px-4 py-2 text-right text-sm">{formatCurrency(item['Gross Margin'] || item['Amount'] || item['Contract Value'] || 0)}</td>
@@ -7790,7 +7794,7 @@ const getSalesChannel = (market, project = null) => {
   // HDI projects are always direct sales, even in CA
   if (project) {
     const projectId = (project['Project ID'] || '').toUpperCase();
-    const customer = (project['Status'] || project['Customer (text)'] || '').toUpperCase();
+    const customer = (project['Name'] || project['Customer (text)'] || '').toUpperCase();
     if (projectId.includes('HDI') || customer.includes('HDI')) {
       return 'direct';
     }
@@ -7920,7 +7924,7 @@ function DesignEngineeringView({ projects, tasks, teamMembers, onUpdateTask, onC
         'Task Name': template.name,
         'Phase': phase,
         'Category': template.category,
-        'Status': 'Not Started',
+        'Name': 'Not Started',
         'Start Date': startDate.toISOString().split('T')[0],
         'Due Date': dueDate.toISOString().split('T')[0],
         'Duration': template.duration,
@@ -8672,13 +8676,13 @@ function InvestorDashboardView({ projects, payments }) {
 
     // Cash collected this year
     const cashThisYear = (payments || [])
-      .filter(p => p['Status'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], currentMonth, currentYear))
+      .filter(p => p['Name'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], currentMonth, currentYear))
       .reduce((sum, p) => sum + (p['Amount'] || 0), 0);
 
     // YTD cash
     const ytdCash = (payments || [])
       .filter(p => {
-        if (p['Status'] !== 'Paid') return false;
+        if (p['Name'] !== 'Paid') return false;
         const d = new Date(p['Date'] || p['Paid Date']);
         return d.getFullYear() === thisYear;
       })
@@ -8706,7 +8710,7 @@ function InvestorDashboardView({ projects, payments }) {
       
       // Cash collected this month
       const cashCollected = (payments || [])
-        .filter(p => p['Status'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], m, y))
+        .filter(p => p['Name'] === 'Paid' && isInMonth(p['Date'] || p['Paid Date'], m, y))
         .reduce((sum, p) => sum + (p['Amount'] || 0), 0);
 
       // Units completed this month
