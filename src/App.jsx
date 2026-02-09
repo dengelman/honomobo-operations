@@ -7133,8 +7133,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Mobile Menu Button */}
-      <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow">
-        {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+      <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg:hidden fixed top-6 left-4 z-50 p-3 bg-white rounded-xl shadow-lg border">
+        {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
       </button>
 
       {/* Mobile Navigation - Full Screen Overlay */}
