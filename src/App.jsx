@@ -477,6 +477,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     'Project Name': project?.['Project Name'] || '',
     'Stage': project?.['Stage'] || 'Assessment',
     'Name': project?.['Name'] || '',
+    'Site State/Province': project?.['Site State/Province'] || '',
     'Contract Value': project?.['Contract Value'] || 0,
     'Bay Assignment': project?.['Bay Assignment'] || '',
     'MFG Week': project?.['MFG Week'] || '',
@@ -498,6 +499,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const markets = ['', 'CA', 'HI', 'CO', 'AB', 'ON', 'BC', 'WA', 'NY', 'WI', 'ID', 'NJ', 'MA', 'MI'];
   const stages = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const positions = ['', ...POSITION_IDS];
   const mfgStatuses = ['', 'Fab Complete', 'Framing Complete', 'Mech Rough Ins Complete', 'Drywall Complete', 'Final QC', 'Ready to Ship'];
@@ -564,9 +566,9 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Project Manager</label>
-              <select value={form['Project Manager']} onChange={e => setForm({ ...form, 'Project Manager': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
-                {pms.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
+              <label className="block text-sm font-medium mb-1">Market (State/Province)</label>
+              <select value={form['Site State/Province']} onChange={e => setForm({ ...form, 'Site State/Province': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                {markets.map(m => <option key={m} value={m}>{m || '— Select Market —'}</option>)}
               </select>
             </div>
             <div>
@@ -574,6 +576,13 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
               <input type="number" value={form['Contract Value']} onChange={e => setForm({ ...form, 'Contract Value': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border rounded-lg" />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Project Manager</label>
+              <select value={form['Project Manager']} onChange={e => setForm({ ...form, 'Project Manager': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                {pms.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
+              </select>
+            </div>
           {(form['Stage'] === 'Production' || form['Stage'] === 'Logistics') && (
             <>
               <div className="border-t pt-4 mt-4">
@@ -6937,17 +6946,19 @@ export default function App() {
       if (hasValue(formData['Name'])) {
         cleanedData['Name'] = formData['Name'];
       }
+      if (hasValue(formData['Site State/Province'])) {
+        cleanedData['Site State/Province'] = formData['Site State/Province'];
+      }
       if (hasValue(formData['Bay Assignment'])) {
         cleanedData['Bay Assignment'] = formData['Bay Assignment'];
       }
       if (hasValue(formData['MFG Status'])) {
         cleanedData['MFG Status'] = formData['MFG Status'];
       }
-      // Project Manager - SKIP for now - field may be Linked Record or Collaborator type
-      // Cowork needs to change this to Single select in Airtable first
-      // if (hasValue(formData['Project Manager'])) {
-      //   cleanedData['Project Manager'] = formData['Project Manager'];
-      // }
+      // Project Manager - Single select field
+      if (hasValue(formData['Project Manager'])) {
+        cleanedData['Project Manager'] = formData['Project Manager'];
+      }
       
       // Model / Unit Type
       if (hasValue(formData['Model'])) {
