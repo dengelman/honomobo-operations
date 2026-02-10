@@ -486,7 +486,7 @@ const checkOutdoorBlocking = (projects) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // PROJECT FORM MODAL - Updated with 18 positions
 // ══════════════════════════════════════════════════════════════════════════════
-function ProjectFormModal({ project, onSave, onClose, onDelete }) {
+function ProjectFormModal({ project, onSave, onClose, onDelete, actuals = [] }) {
   const [form, setForm] = useState({
     'Project ID': project?.['Project ID'] || '',
     'Project Name': project?.['Project Name'] || '',
@@ -728,6 +728,96 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
                   </div>
                 </div>
               </div>
+
+              {/* Variance Summary - Only show for existing projects with data */}
+              {project && (form['DE Revenue'] > 0 || form['MFG Revenue'] > 0 || form['LI Revenue'] > 0) && (() => {
+                // Calculate actuals for this project (MFG actuals from Sage)
+                const projectActuals = actuals.filter(a => 
+                  a['Project ID'] === project['Project ID'] ||
+                  a['Project']?.includes(project.id)
+                );
+                const mfgActual = projectActuals.reduce((sum, a) => sum + (a['Amount'] || 0), 0);
+                
+                // For now, D&E and L&I actuals would need to be tracked separately
+                // Using budget as placeholder until actual tracking is set up
+                const deActual = project['DE Actual'] || 0;
+                const liActual = project['LI Actual'] || 0;
+                
+                const totalRevenue = (form['DE Revenue'] || 0) + (form['MFG Revenue'] || 0) + (form['LI Revenue'] || 0);
+                const totalBudget = (form['DE Budget'] || 0) + (form['MFG Budget'] || 0) + (form['Logistics Budget'] || 0);
+                const totalActual = deActual + mfgActual + liActual;
+                const budgetVariance = totalBudget - totalActual;
+                const projectedMargin = totalRevenue > 0 ? ((totalRevenue - totalActual) / totalRevenue * 100) : 0;
+                
+                return (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
+                    <div className="text-xs font-semibold text-gray-600 uppercase mb-3">Financial Summary</div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-500 border-b">
+                          <th className="text-left py-1">Dept</th>
+                          <th className="text-right py-1">Revenue</th>
+                          <th className="text-right py-1">Budget</th>
+                          <th className="text-right py-1">Actual</th>
+                          <th className="text-right py-1">Variance</th>
+                          <th className="text-right py-1">Margin</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        <tr>
+                          <td className="py-1.5 font-medium">D&E</td>
+                          <td className="py-1.5 text-right text-emerald-600">${(form['DE Revenue'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right text-blue-600">${(form['DE Budget'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right">${deActual.toLocaleString()}</td>
+                          <td className={`py-1.5 text-right ${(form['DE Budget'] || 0) - deActual >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            ${((form['DE Budget'] || 0) - deActual).toLocaleString()}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            {form['DE Revenue'] > 0 ? `${Math.round(((form['DE Revenue'] - deActual) / form['DE Revenue']) * 100)}%` : '—'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-1.5 font-medium">MFG</td>
+                          <td className="py-1.5 text-right text-emerald-600">${(form['MFG Revenue'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right text-blue-600">${(form['MFG Budget'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right">${mfgActual.toLocaleString()}</td>
+                          <td className={`py-1.5 text-right ${(form['MFG Budget'] || 0) - mfgActual >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            ${((form['MFG Budget'] || 0) - mfgActual).toLocaleString()}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            {form['MFG Revenue'] > 0 ? `${Math.round(((form['MFG Revenue'] - mfgActual) / form['MFG Revenue']) * 100)}%` : '—'}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="py-1.5 font-medium">L&I</td>
+                          <td className="py-1.5 text-right text-emerald-600">${(form['LI Revenue'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right text-blue-600">${(form['Logistics Budget'] || 0).toLocaleString()}</td>
+                          <td className="py-1.5 text-right">${liActual.toLocaleString()}</td>
+                          <td className={`py-1.5 text-right ${(form['Logistics Budget'] || 0) - liActual >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            ${((form['Logistics Budget'] || 0) - liActual).toLocaleString()}
+                          </td>
+                          <td className="py-1.5 text-right">
+                            {form['LI Revenue'] > 0 ? `${Math.round(((form['LI Revenue'] - liActual) / form['LI Revenue']) * 100)}%` : '—'}
+                          </td>
+                        </tr>
+                        <tr className="font-semibold border-t-2 border-gray-300">
+                          <td className="py-2">TOTAL</td>
+                          <td className="py-2 text-right text-emerald-700">${totalRevenue.toLocaleString()}</td>
+                          <td className="py-2 text-right text-blue-700">${totalBudget.toLocaleString()}</td>
+                          <td className="py-2 text-right">${totalActual.toLocaleString()}</td>
+                          <td className={`py-2 text-right ${budgetVariance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                            ${budgetVariance.toLocaleString()}
+                          </td>
+                          <td className={`py-2 text-right ${projectedMargin >= 20 ? 'text-emerald-700' : projectedMargin >= 10 ? 'text-amber-600' : 'text-red-700'}`}>
+                            {totalRevenue > 0 ? `${Math.round(projectedMargin)}%` : '—'}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {mfgActual === 0 && <div className="text-[10px] text-gray-400 mt-2">MFG Actuals from Sage import • D&E/L&I Actuals tracking coming soon</div>}
+                  </div>
+                );
+              })()}
             </div>
           )}
           
@@ -7302,6 +7392,7 @@ export default function App() {
           onSave={handleSaveProject}
           onDelete={handleDeleteProject}
           onClose={() => { setShowForm(false); setEditingProject(null); }}
+          actuals={actuals}
         />
       )}
     </div>
