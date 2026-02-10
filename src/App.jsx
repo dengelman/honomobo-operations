@@ -583,6 +583,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
                 {pms.map(s => <option key={s} value={s}>{s || '— Select —'}</option>)}
               </select>
             </div>
+          </div>
           {(form['Stage'] === 'Production' || form['Stage'] === 'Logistics') && (
             <>
               <div className="border-t pt-4 mt-4">
