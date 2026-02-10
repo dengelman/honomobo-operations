@@ -347,6 +347,21 @@ const MODEL_DURATIONS = {
   'SO1': { steel_fab: 4, sandblast: 5, framing: 3, mep_rough: 4, insulation: 2, drywall: 4, finishes: 3, cabinets_trim: 3, final_qc: 2, ready_to_ship: 1, total: 31 },
 };
 
+// MFG Cost templates per model (baseline estimates)
+const MODEL_MFG_COSTS = {
+  'SO1': 120000,
+  'HO2': 215000,
+  'HO3': 300000,
+  'HO4': 390000,
+  'HO5': 465000,
+  'HS6': 530000,
+  'HS8': 610000,
+};
+
+// Margin calculations for D&E and L&I
+const DE_MARGIN = 0.30;  // 30% margin → cost = 70% of revenue
+const LI_MARGIN = 0.20;  // 20% margin → cost = 80% of revenue
+
 // Default durations (use HO3 as baseline)
 const DEFAULT_DURATIONS = MODEL_DURATIONS['HO3'];
 
@@ -507,6 +522,31 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
   const pms = ['', 'Ryan Sieben', 'Will Colford', 'Nash Thornton', 'Jarod Kawalle'];
   const models = ['', 'HO2', 'HO3', 'HO4', 'HO5', 'HS6', 'HS8', 'SO1', 'Custom'];
 
+  // Auto-calculate D&E Budget when D&E Revenue changes (30% margin → 70% cost)
+  const handleDERevenueChange = (value) => {
+    const revenue = parseInt(value) || 0;
+    const budget = Math.round(revenue * (1 - DE_MARGIN));
+    setForm({ ...form, 'DE Revenue': revenue, 'DE Budget': budget });
+  };
+
+  // Auto-calculate L&I Budget when L&I Revenue changes (20% margin → 80% cost)
+  const handleLIRevenueChange = (value) => {
+    const revenue = parseInt(value) || 0;
+    const budget = Math.round(revenue * (1 - LI_MARGIN));
+    setForm({ ...form, 'LI Revenue': revenue, 'Logistics Budget': budget });
+  };
+
+  // Auto-populate MFG Budget when Model changes
+  const handleModelChange = (model) => {
+    const mfgCost = MODEL_MFG_COSTS[model] || 0;
+    const newForm = { ...form, 'Model': model };
+    // Only auto-fill if MFG Budget is 0 or model changed
+    if (form['MFG Budget'] === 0 || form['Model'] !== model) {
+      newForm['MFG Budget'] = mfgCost;
+    }
+    setForm(newForm);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -559,7 +599,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Model / Unit Type</label>
-              <select value={form['Model']} onChange={e => setForm({ ...form, 'Model': e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+              <select value={form['Model']} onChange={e => handleModelChange(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
                 {models.map(m => <option key={m} value={m}>{m || '— Select Model —'}</option>)}
               </select>
             </div>
@@ -651,34 +691,40 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1">D&E Revenue ($)</label>
-                    <input type="number" value={form['DE Revenue'] || ''} onChange={e => setForm({ ...form, 'DE Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                    <input type="number" value={form['DE Revenue'] || ''} onChange={e => handleDERevenueChange(e.target.value)} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                    <div className="text-[10px] text-gray-400 mt-1">Budget auto-calcs at 30% margin</div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">MFG Revenue ($)</label>
                     <input type="number" value={form['MFG Revenue'] || ''} onChange={e => setForm({ ...form, 'MFG Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                    <div className="text-[10px] text-gray-400 mt-1">Varies by market/dealer</div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">L&I Revenue ($)</label>
-                    <input type="number" value={form['LI Revenue'] || ''} onChange={e => setForm({ ...form, 'LI Revenue': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                    <input type="number" value={form['LI Revenue'] || ''} onChange={e => handleLIRevenueChange(e.target.value)} className="w-full px-3 py-2 border border-emerald-200 rounded-lg bg-emerald-50/50" placeholder="0" />
+                    <div className="text-[10px] text-gray-400 mt-1">Budget auto-calcs at 20% margin</div>
                   </div>
                 </div>
               </div>
               
               {/* Budget Row */}
               <div>
-                <div className="text-xs font-semibold text-blue-600 uppercase mb-2">Budget (Cost)</div>
+                <div className="text-xs font-semibold text-blue-600 uppercase mb-2">Budget (Estimated Cost)</div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1">D&E Budget ($)</label>
                     <input type="number" value={form['DE Budget'] || ''} onChange={e => setForm({ ...form, 'DE Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                    <div className="text-[10px] text-emerald-600 mt-1">{form['DE Revenue'] > 0 ? `${Math.round((1 - form['DE Budget']/form['DE Revenue']) * 100)}% margin` : ''}</div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">MFG Budget ($)</label>
                     <input type="number" value={form['MFG Budget'] || ''} onChange={e => setForm({ ...form, 'MFG Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                    <div className="text-[10px] text-gray-400 mt-1">{form['Model'] && MODEL_MFG_COSTS[form['Model']] ? `Template: $${MODEL_MFG_COSTS[form['Model']].toLocaleString()}` : 'Select model for template'}</div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">L&I Budget ($)</label>
                     <input type="number" value={form['Logistics Budget'] || ''} onChange={e => setForm({ ...form, 'Logistics Budget': parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-blue-200 rounded-lg bg-blue-50/50" placeholder="0" />
+                    <div className="text-[10px] text-emerald-600 mt-1">{form['LI Revenue'] > 0 ? `${Math.round((1 - form['Logistics Budget']/form['LI Revenue']) * 100)}% margin` : ''}</div>
                   </div>
                 </div>
               </div>
