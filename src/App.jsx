@@ -731,17 +731,22 @@ function ProjectFormModal({ project, onSave, onClose, onDelete, actuals = [] }) 
 
               {/* Variance Summary - Only show for existing projects with data */}
               {project && (form['DE Revenue'] > 0 || form['MFG Revenue'] > 0 || form['LI Revenue'] > 0) && (() => {
-                // Calculate actuals for this project (MFG actuals from Sage)
+                // Get actuals for this project by department
                 const projectActuals = actuals.filter(a => 
                   a['Project ID'] === project['Project ID'] ||
                   a['Project']?.includes(project.id)
                 );
-                const mfgActual = projectActuals.reduce((sum, a) => sum + (a['Amount'] || 0), 0);
                 
-                // For now, D&E and L&I actuals would need to be tracked separately
-                // Using budget as placeholder until actual tracking is set up
-                const deActual = project['DE Actual'] || 0;
-                const liActual = project['LI Actual'] || 0;
+                // Sum actuals by department
+                const deActual = projectActuals
+                  .filter(a => a['Department'] === 'D&E')
+                  .reduce((sum, a) => sum + (a['Amount'] || 0), 0);
+                const mfgActual = projectActuals
+                  .filter(a => a['Department'] === 'MFG' || !a['Department']) // Default to MFG for legacy records
+                  .reduce((sum, a) => sum + (a['Amount'] || 0), 0);
+                const liActual = projectActuals
+                  .filter(a => a['Department'] === 'L&I')
+                  .reduce((sum, a) => sum + (a['Amount'] || 0), 0);
                 
                 const totalRevenue = (form['DE Revenue'] || 0) + (form['MFG Revenue'] || 0) + (form['LI Revenue'] || 0);
                 const totalBudget = (form['DE Budget'] || 0) + (form['MFG Budget'] || 0) + (form['Logistics Budget'] || 0);
@@ -751,7 +756,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete, actuals = [] }) 
                 
                 return (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg border">
-                    <div className="text-xs font-semibold text-gray-600 uppercase mb-3">Financial Summary</div>
+                    <div className="text-xs font-semibold text-gray-600 uppercase mb-3">Financial Summary (Estimated vs Actual)</div>
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="text-xs text-gray-500 border-b">
@@ -814,7 +819,8 @@ function ProjectFormModal({ project, onSave, onClose, onDelete, actuals = [] }) 
                         </tr>
                       </tbody>
                     </table>
-                    {mfgActual === 0 && <div className="text-[10px] text-gray-400 mt-2">MFG Actuals from Sage import • D&E/L&I Actuals tracking coming soon</div>}
+                    {totalActual === 0 && <div className="text-[10px] text-gray-400 mt-2">Actuals from Sage import (DESIGN/BUILD/INSTALL job codes)</div>}
+                    {totalActual > 0 && <div className="text-[10px] text-emerald-600 mt-2">✓ Actuals imported from Sage</div>}
                   </div>
                 );
               })()}
@@ -5612,51 +5618,168 @@ function SageImportView({ projects, onImportComplete }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [previewData, setPreviewData] = useState(null);
+  const [parsedRecords, setParsedRecords] = useState([]);
+
+  // Department detection from job code suffix
+  const getDepartment = (jobCode) => {
+    if (!jobCode) return 'MFG';
+    const upper = jobCode.toUpperCase();
+    if (upper.includes('DESIGN')) return 'D&E';
+    if (upper.includes('INSTALL')) return 'L&I';
+    if (upper.includes('BUILD')) return 'MFG';
+    return 'MFG'; // Default to MFG
+  };
+
+  // Extract base project ID from job code (e.g., "H0375 DESIGN" → "HO375" or "H0375-A BUILD" → "HO375")
+  const extractProjectId = (jobCode) => {
+    if (!jobCode) return null;
+    // Remove suffix and normalize
+    const cleaned = jobCode
+      .replace(/\s*(DESIGN|INSTALL|BUILD)\s*/gi, '')
+      .replace(/-[A-Z]$/i, '') // Remove -A, -B suffixes
+      .trim()
+      .toUpperCase();
+    // Convert H0375 to HO375 format if needed
+    return cleaned.replace(/^H0/, 'HO');
+  };
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     setFile(selectedFile);
     setImportResult(null);
     setPreviewData(null);
+    setParsedRecords([]);
 
     if (selectedFile) {
-      // Preview CSV
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target.result;
-        const lines = text.split('\n').slice(0, 6); // First 5 data rows + header
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-        const rows = lines.slice(1).map(line => {
-          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-          return headers.reduce((obj, h, i) => ({ ...obj, [h]: values[i] }), {});
+        const lines = text.split('\n').filter(l => l.trim());
+        
+        // Parse all records
+        const records = [];
+        let currentJob = null;
+        let currentDept = null;
+        let currentProjectId = null;
+        
+        lines.forEach(line => {
+          // Check if this is a job header line (e.g., "H0375 DESIGN - 2020 HO4+M1 - Malhotra/Singh")
+          const jobMatch = line.match(/^([A-Z0-9-]+\s+(?:DESIGN|INSTALL|BUILD))/i);
+          if (jobMatch) {
+            currentJob = jobMatch[1];
+            currentDept = getDepartment(currentJob);
+            currentProjectId = extractProjectId(currentJob);
+            return;
+          }
+          
+          // Check if this is an account line (starts with account number)
+          const accountMatch = line.match(/^(\d{5})\s+(.+?)\s+([\d,.-]+)(?:\s+([\d,.-]+))?$/);
+          if (accountMatch && currentJob) {
+            const [, account, name, col1, col2] = accountMatch;
+            const amount = parseFloat((col2 || col1).replace(/,/g, '')) || 0;
+            const isRevenue = account.startsWith('4');
+            
+            records.push({
+              jobCode: currentJob,
+              projectId: currentProjectId,
+              department: currentDept,
+              account,
+              accountName: name.trim(),
+              amount: isRevenue ? 0 : amount,
+              revenue: isRevenue ? amount : 0,
+              type: isRevenue ? 'Revenue' : 'Expense'
+            });
+          }
         });
-        setPreviewData({ headers, rows });
+        
+        setParsedRecords(records);
+        
+        // Create preview summary by project/department
+        const summary = {};
+        records.forEach(r => {
+          const key = `${r.projectId}-${r.department}`;
+          if (!summary[key]) {
+            summary[key] = { projectId: r.projectId, department: r.department, revenue: 0, expense: 0, records: 0 };
+          }
+          summary[key].revenue += r.revenue;
+          summary[key].expense += r.amount;
+          summary[key].records++;
+        });
+        
+        setPreviewData({
+          totalRecords: records.length,
+          summary: Object.values(summary),
+          sampleRecords: records.slice(0, 10)
+        });
       };
       reader.readAsText(selectedFile);
     }
   };
 
   const handleImport = async () => {
-    if (!file) return;
+    if (!file || parsedRecords.length === 0) return;
     
     setImporting(true);
     setImportResult(null);
 
     try {
-      // Simulate import processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // In a real implementation, you would:
-      // 1. Parse the CSV file
-      // 2. Match records to projects by Project ID
-      // 3. Update Airtable with actual costs
+      // Group records by project and department
+      const byProject = {};
+      parsedRecords.forEach(r => {
+        if (!r.projectId) return;
+        if (!byProject[r.projectId]) {
+          byProject[r.projectId] = { 'D&E': { revenue: 0, expense: 0 }, 'MFG': { revenue: 0, expense: 0 }, 'L&I': { revenue: 0, expense: 0 } };
+        }
+        byProject[r.projectId][r.department].revenue += r.revenue;
+        byProject[r.projectId][r.department].expense += r.amount;
+      });
+      
+      // Match to existing projects and create actuals records
+      let matched = 0;
+      let skipped = 0;
+      const actualsToCreate = [];
+      
+      Object.entries(byProject).forEach(([projectId, depts]) => {
+        // Find matching project
+        const project = projects.find(p => 
+          p['Project ID']?.toUpperCase() === projectId ||
+          p['Project ID']?.toUpperCase().replace(/^HO/, 'H0') === projectId.replace(/^HO/, 'H0')
+        );
+        
+        if (project) {
+          matched++;
+          // Create actuals records for each department
+          Object.entries(depts).forEach(([dept, amounts]) => {
+            if (amounts.expense > 0 || amounts.revenue > 0) {
+              actualsToCreate.push({
+                'Project ID': project['Project ID'],
+                'Project': [project.id],
+                'Department': dept,
+                'Amount': amounts.expense,
+                'Revenue': amounts.revenue,
+                'Category': `${dept} Costs`,
+                'Import Date': new Date().toISOString().split('T')[0],
+                'Source': 'Sage Import'
+              });
+            }
+          });
+        } else {
+          skipped++;
+        }
+      });
+      
+      // Batch create actuals in Airtable
+      if (actualsToCreate.length > 0) {
+        await airtableAPI.createActualsBatch(actualsToCreate);
+      }
       
       setImportResult({
         success: true,
-        recordsProcessed: previewData?.rows.length || 0,
-        recordsMatched: Math.floor((previewData?.rows.length || 0) * 0.9),
-        recordsSkipped: Math.ceil((previewData?.rows.length || 0) * 0.1),
-        message: 'Import completed successfully'
+        recordsProcessed: parsedRecords.length,
+        projectsMatched: matched,
+        projectsSkipped: skipped,
+        actualsCreated: actualsToCreate.length,
+        message: `Import completed! ${matched} projects updated, ${skipped} not found.`
       });
 
       if (onImportComplete) {
@@ -5683,21 +5806,21 @@ function SageImportView({ projects, onImportComplete }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-900">Sage Import</h2>
-          <p className="text-sm text-gray-500">Import actual costs from Sage accounting • <span className="text-blue-600 font-medium">Updates Airtable</span></p>
+          <p className="text-sm text-gray-500">Import actual costs from Sage • Auto-categorizes by D&E / MFG / L&I • <span className="text-blue-600 font-medium">Updates Airtable</span></p>
         </div>
       </div>
 
       {/* Import Card */}
       <div className="bg-white rounded-xl border p-6">
-        <h3 className="font-semibold mb-4">Upload Sage Export</h3>
+        <h3 className="font-semibold mb-4">Upload Sage Job Site Income Summary</h3>
         
         <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center">
           <Upload className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-600 mb-2">Drop your Sage CSV export here, or click to browse</p>
-          <p className="text-sm text-gray-400 mb-4">Supports CSV files with Project ID, Cost Category, and Amount columns</p>
+          <p className="text-gray-600 mb-2">Drop your Sage Job Site Income Summary export here</p>
+          <p className="text-sm text-gray-400 mb-4">Parses DESIGN / BUILD / INSTALL job codes automatically</p>
           <input
             type="file"
-            accept=".csv"
+            accept=".csv,.txt"
             onChange={handleFileChange}
             className="hidden"
             id="sage-file-input"
@@ -5718,12 +5841,12 @@ function SageImportView({ projects, onImportComplete }) {
                 <FileText className="w-8 h-8 text-gray-400" />
                 <div>
                   <div className="font-medium">{file.name}</div>
-                  <div className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB</div>
+                  <div className="text-sm text-gray-500">{(file.size / 1024).toFixed(1)} KB • {parsedRecords.length} line items parsed</div>
                 </div>
               </div>
               <button
                 onClick={handleImport}
-                disabled={importing}
+                disabled={importing || parsedRecords.length === 0}
                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {importing ? (
@@ -5734,7 +5857,7 @@ function SageImportView({ projects, onImportComplete }) {
                 ) : (
                   <>
                     <Upload className="w-4 h-4" />
-                    Import
+                    Import to Airtable
                   </>
                 )}
               </button>
@@ -5742,29 +5865,82 @@ function SageImportView({ projects, onImportComplete }) {
           </div>
         )}
 
-        {/* Preview */}
+        {/* Preview Summary */}
         {previewData && (
-          <div className="mt-4">
-            <h4 className="font-medium text-gray-700 mb-2">Preview (first 5 rows)</h4>
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {previewData.headers.map((h, i) => (
-                      <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {previewData.rows.map((row, i) => (
-                    <tr key={i}>
-                      {previewData.headers.map((h, j) => (
-                        <td key={j} className="px-3 py-2 text-gray-600">{row[h] || '—'}</td>
-                      ))}
+          <div className="mt-4 space-y-4">
+            <div>
+              <h4 className="font-medium text-gray-700 mb-2">Summary by Project & Department</h4>
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Project ID</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dept</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Revenue</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Expense</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Lines</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y">
+                    {previewData.summary.map((row, i) => {
+                      const margin = row.revenue > 0 ? ((row.revenue - row.expense) / row.revenue * 100) : 0;
+                      return (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{row.projectId}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              row.department === 'D&E' ? 'bg-blue-100 text-blue-700' :
+                              row.department === 'MFG' ? 'bg-emerald-100 text-emerald-700' :
+                              'bg-purple-100 text-purple-700'
+                            }`}>{row.department}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-emerald-600">${row.revenue.toLocaleString()}</td>
+                          <td className="px-3 py-2 text-right text-red-600">${row.expense.toLocaleString()}</td>
+                          <td className={`px-3 py-2 text-right font-medium ${margin >= 20 ? 'text-emerald-600' : margin >= 10 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {row.revenue > 0 ? `${margin.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-400">{row.records}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-gray-700 mb-2">Sample Line Items (first 10)</h4>
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Dept</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Account</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {previewData.sampleRecords.map((row, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{row.projectId}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            row.department === 'D&E' ? 'bg-blue-100 text-blue-700' :
+                            row.department === 'MFG' ? 'bg-emerald-100 text-emerald-700' :
+                            'bg-purple-100 text-purple-700'
+                          }`}>{row.department}</span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-500">{row.account}</td>
+                        <td className="px-3 py-2">{row.accountName}</td>
+                        <td className="px-3 py-2 text-right">${(row.amount || row.revenue).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -5783,16 +5959,39 @@ function SageImportView({ projects, onImportComplete }) {
                   {importResult.message}
                 </div>
                 {importResult.success && (
-                  <div className="mt-2 text-sm text-emerald-700">
-                    <div>Records processed: {importResult.recordsProcessed}</div>
-                    <div>Records matched: {importResult.recordsMatched}</div>
-                    <div>Records skipped: {importResult.recordsSkipped}</div>
+                  <div className="mt-2 text-sm text-emerald-700 space-y-1">
+                    <div>Line items parsed: {importResult.recordsProcessed}</div>
+                    <div>Projects matched: {importResult.projectsMatched}</div>
+                    <div>Projects not found: {importResult.projectsSkipped}</div>
+                    <div>Actuals records created: {importResult.actualsCreated}</div>
                   </div>
                 )}
               </div>
             </div>
           </div>
         )}
+      </div>
+
+      {/* Department Mapping Guide */}
+      <div className="bg-white rounded-xl border p-6">
+        <h3 className="font-semibold mb-4">How Department Mapping Works</h3>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="font-medium text-blue-800 mb-2">D&E (Design & Engineering)</div>
+            <div className="text-sm text-blue-600">Job codes containing "DESIGN"</div>
+            <div className="text-xs text-blue-500 mt-2">e.g., H0375 DESIGN - 2020 HO4</div>
+          </div>
+          <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+            <div className="font-medium text-emerald-800 mb-2">MFG (Manufacturing)</div>
+            <div className="text-sm text-emerald-600">Job codes containing "BUILD"</div>
+            <div className="text-xs text-emerald-500 mt-2">e.g., H0375-A BUILD - 2020 HO4</div>
+          </div>
+          <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+            <div className="font-medium text-purple-800 mb-2">L&I (Logistics & Install)</div>
+            <div className="text-sm text-purple-600">Job codes containing "INSTALL"</div>
+            <div className="text-xs text-purple-500 mt-2">e.g., H0375 INSTALL - 2020 HO4</div>
+          </div>
+        </div>
       </div>
 
       {/* Recent Imports */}
