@@ -714,6 +714,7 @@ function ProjectFormModal({ project, onSave, onClose, onDelete }) {
     </div>
   );
 }
+
 function DashboardView({ projects, onEdit }) {
   const STAGES = ['Assessment', 'Concept', 'D&E', 'Permitting', 'Production', 'Logistics', 'Complete'];
   const stageColors = { 'Assessment': '#64748b', 'Concept': '#a855f7', 'D&E': '#3b82f6', 'Permitting': '#f59e0b', 'Production': '#10b981', 'Logistics': '#f97316', 'Complete': '#6b7280' };
