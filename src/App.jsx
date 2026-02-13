@@ -321,33 +321,131 @@ const getModCountFromModel = (project) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MFG STAGES & MODEL DURATIONS (Work Days)
+// NETWORKDAYS & HOLIDAY CALENDAR
 // ══════════════════════════════════════════════════════════════════════════════
-const MFG_STAGES = [
-  { id: 'steel_fab', name: 'Steel Fab', location: 'fab', color: '#6B7280' },
-  { id: 'sandblast', name: 'Sandblast', location: 'outside', color: '#9CA3AF' },
-  { id: 'framing', name: 'Framing', location: 'build', color: '#3B82F6' },
-  { id: 'mep_rough', name: 'MEP Rough', location: 'build', color: '#F97316' },
-  { id: 'insulation', name: 'Insulation', location: 'build', color: '#EAB308' },
-  { id: 'drywall', name: 'Drywall', location: 'build', color: '#EC4899' },
-  { id: 'finishes', name: 'Finishes', location: 'build', color: '#8B5CF6' },
-  { id: 'cabinets_trim', name: 'Cabinets/Trim', location: 'build', color: '#14B8A6' },
-  { id: 'final_qc', name: 'Final QC', location: 'build', color: '#10B981' },
-  { id: 'ready_to_ship', name: 'Ready to Ship', location: 'flex', color: '#06B6D4' },
-];
+// Canadian holidays + Alberta-specific + factory shutdown (update annually)
+const HOLIDAYS = new Set([
+  // 2026
+  '2026-01-01','2026-02-16','2026-04-03','2026-04-06','2026-05-18',
+  '2026-07-01','2026-08-03','2026-09-07','2026-10-12','2026-11-11',
+  '2026-12-21','2026-12-22','2026-12-23','2026-12-24','2026-12-25',
+  '2026-12-26','2026-12-29','2026-12-30','2026-12-31',
+  // 2027 (partial — extend as needed)
+  '2027-01-01','2027-01-02','2027-02-15','2027-03-26','2027-03-29',
+  '2027-05-24','2027-07-01','2027-08-02','2027-09-06','2027-10-11',
+  '2027-11-11','2027-12-25','2027-12-26',
+]);
 
-// Duration in work days per model per stage
-const MODEL_DURATIONS = {
-  'HO2': { steel_fab: 5, sandblast: 5, framing: 4, mep_rough: 5, insulation: 3, drywall: 4, finishes: 5, cabinets_trim: 5, final_qc: 3, ready_to_ship: 2, total: 41 },
-  'HO3': { steel_fab: 7, sandblast: 5, framing: 5, mep_rough: 6, insulation: 3, drywall: 4, finishes: 5, cabinets_trim: 5, final_qc: 3, ready_to_ship: 3, total: 46 },
-  'HO4': { steel_fab: 8, sandblast: 5, framing: 8, mep_rough: 7, insulation: 3, drywall: 4, finishes: 6, cabinets_trim: 6, final_qc: 4, ready_to_ship: 4, total: 55 },
-  'HO5': { steel_fab: 10, sandblast: 5, framing: 10, mep_rough: 8, insulation: 3, drywall: 5, finishes: 7, cabinets_trim: 7, final_qc: 5, ready_to_ship: 5, total: 65 },
-  'HS6': { steel_fab: 12, sandblast: 5, framing: 12, mep_rough: 9, insulation: 4, drywall: 6, finishes: 8, cabinets_trim: 8, final_qc: 5, ready_to_ship: 6, total: 75 },
-  'HS8': { steel_fab: 15, sandblast: 5, framing: 15, mep_rough: 10, insulation: 5, drywall: 7, finishes: 10, cabinets_trim: 10, final_qc: 7, ready_to_ship: 8, total: 92 },
-  'SO1': { steel_fab: 4, sandblast: 5, framing: 3, mep_rough: 4, insulation: 2, drywall: 4, finishes: 3, cabinets_trim: 3, final_qc: 2, ready_to_ship: 1, total: 31 },
+const isWorkday = (date) => {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  const iso = date.toISOString().split('T')[0];
+  return !HOLIDAYS.has(iso);
 };
 
-// MFG Cost templates per model (baseline estimates)
+// Add N workdays to a start date, returning the end date
+const addWorkdays = (startDate, numDays) => {
+  const d = new Date(startDate);
+  let added = 0;
+  while (added < numDays) {
+    d.setDate(d.getDate() + 1);
+    if (isWorkday(d)) added++;
+  }
+  return d;
+};
+
+// Count workdays between two dates (inclusive of start, exclusive of end)
+const countWorkdays = (startDate, endDate) => {
+  let count = 0;
+  const d = new Date(startDate);
+  const end = new Date(endDate);
+  while (d < end) {
+    if (isWorkday(d)) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+};
+
+// Convert calendar-day offset from today into workday count
+const calendarDaysToWorkdays = (calDays, fromDate) => {
+  const start = new Date(fromDate);
+  const end = new Date(fromDate);
+  end.setDate(end.getDate() + calDays);
+  return countWorkdays(start, end);
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MFG STAGES & MODEL DURATIONS (Work Days — NETWORKDAYS)
+// Source: Curtis's 2025 Workday Burdens spreadsheet (granular trade-level)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Display stages for UI visualization (Gantt bars, progress indicators)
+const MFG_STAGES = [
+  { id: 'steel_fab', name: 'Steel Fab', location: 'fab', color: '#6B7280', parentStage: 1 },
+  { id: 'sandblast', name: 'Sandblast', location: 'outside', color: '#9CA3AF', parentStage: 1 },
+  { id: 'framing', name: 'Framing', location: 'build', color: '#3B82F6', parentStage: 2 },
+  { id: 'mep_rough', name: 'MEP Rough', location: 'build', color: '#F97316', parentStage: 2 },
+  { id: 'insulation', name: 'Insulation', location: 'build', color: '#EAB308', parentStage: 2 },
+  { id: 'drywall', name: 'Drywall', location: 'build', color: '#EC4899', parentStage: 2 },
+  { id: 'finishes', name: 'Finishes', location: 'build', color: '#8B5CF6', parentStage: 3 },
+  { id: 'cabinets_trim', name: 'Cabinets/Trim', location: 'build', color: '#14B8A6', parentStage: 3 },
+  { id: 'final_qc', name: 'Final QC', location: 'build', color: '#10B981', parentStage: 4 },
+  { id: 'ready_to_ship', name: 'Ready to Ship', location: 'flex', color: '#06B6D4', parentStage: 4 },
+];
+
+// PRIMARY: 4-stage workday burdens (NETWORKDAYS) from Curtis's spreadsheet
+// These are the REAL durations used for scheduling and forecasting.
+const MODEL_DURATIONS_4STAGE = {
+  'SO1':       { stage1: 7,  stage2: 19, stage3: 26, stage4: 4,  total: 56  },
+  'AO1':       { stage1: 8,  stage2: 20, stage3: 27, stage4: 4,  total: 59  },
+  'HO2':       { stage1: 8,  stage2: 19, stage3: 27, stage4: 4,  total: 58  },
+  'HO3':       { stage1: 9,  stage2: 28, stage3: 30, stage4: 4,  total: 71  },
+  'HO4':       { stage1: 10, stage2: 36, stage3: 33, stage4: 4,  total: 83  },
+  'HO5':       { stage1: 12, stage2: 44, stage3: 41, stage4: 5,  total: 102 },
+  'HS6':       { stage1: 9,  stage2: 63, stage3: 48, stage4: 6,  total: 126 },
+  'HS8':       { stage1: 11, stage2: 70, stage3: 52, stage4: 6,  total: 139 },
+  'BAR':       { stage1: 4,  stage2: 6,  stage3: 10, stage4: 5,  total: 25  },
+  'BOXX 8X10': { stage1: 4,  stage2: 9,  stage3: 3,  stage4: 2,  total: 18  },
+  'BOXX 8X20': { stage1: 4,  stage2: 11, stage3: 5,  stage4: 2,  total: 22  },
+  'BOXX 8X40': { stage1: 4,  stage2: 18, stage3: 10, stage4: 2,  total: 34  },
+};
+
+// Proportional distribution weights for 10-stage UI display
+// These split each 4-stage total into the 10 display stages for Gantt/progress bars
+const STAGE_DISPLAY_WEIGHTS = {
+  stage1: { steel_fab: 0.6, sandblast: 0.4 },
+  stage2: { framing: 0.30, mep_rough: 0.30, insulation: 0.15, drywall: 0.25 },
+  stage3: { finishes: 0.55, cabinets_trim: 0.45 },
+  stage4: { final_qc: 0.60, ready_to_ship: 0.40 },
+};
+
+// Generate 10-stage display durations from 4-stage model (for UI backward compatibility)
+const getDisplayDurations = (dur4) => {
+  const result = { total: dur4.total };
+  for (const [parentKey, substages] of Object.entries(STAGE_DISPLAY_WEIGHTS)) {
+    const parentDays = dur4[parentKey] || 0;
+    let allocated = 0;
+    const entries = Object.entries(substages);
+    entries.forEach(([stageId, weight], idx) => {
+      if (idx === entries.length - 1) {
+        result[stageId] = parentDays - allocated; // last stage gets remainder (avoids rounding drift)
+      } else {
+        const days = Math.round(parentDays * weight);
+        result[stageId] = days;
+        allocated += days;
+      }
+    });
+  }
+  return result;
+};
+
+// BACKWARD-COMPATIBLE: MODEL_DURATIONS in the 10-stage format (used by UI components)
+// Generated from the 4-stage source of truth
+const MODEL_DURATIONS = Object.fromEntries(
+  Object.entries(MODEL_DURATIONS_4STAGE).map(([model, dur4]) => [model, getDisplayDurations(dur4)])
+);
+
+// MFG Cost templates per model (baseline estimates, CAD)
 const MODEL_MFG_COSTS = {
   'SO1': 120000,
   'HO2': 215000,
@@ -356,6 +454,10 @@ const MODEL_MFG_COSTS = {
   'HO5': 465000,
   'HS6': 530000,
   'HS8': 610000,
+  'BAR': 35000,
+  'BOXX 8X10': 15000,
+  'BOXX 8X20': 25000,
+  'BOXX 8X40': 45000,
 };
 
 // Margin calculations for D&E and L&I
@@ -364,11 +466,28 @@ const LI_MARGIN = 0.20;  // 20% margin → cost = 80% of revenue
 
 // Default durations (use HO3 as baseline)
 const DEFAULT_DURATIONS = MODEL_DURATIONS['HO3'];
+const DEFAULT_DURATIONS_4STAGE = MODEL_DURATIONS_4STAGE['HO3'];
 
-// Get durations for a project based on model
+// Get 4-stage durations for a project, respecting per-project overrides
+const getProjectDurations = (project) => {
+  const model = (project?.['Model'] || 'HO3').toUpperCase();
+  const defaults = MODEL_DURATIONS_4STAGE[model] || DEFAULT_DURATIONS_4STAGE;
+  const s1 = project?.['Duration Override - Stage 1'] || defaults.stage1;
+  const s2 = project?.['Duration Override - Stage 2'] || defaults.stage2;
+  const s3 = project?.['Duration Override - Stage 3'] || defaults.stage3;
+  const s4 = project?.['Duration Override - Stage 4'] || defaults.stage4;
+  return { stage1: s1, stage2: s2, stage3: s3, stage4: s4, total: s1 + s2 + s3 + s4 };
+};
+
+// Get 10-stage display durations for a project (UI visualization)
 const getModelDurations = (project) => {
   const model = (project?.['Model'] || '').toUpperCase();
   return MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+};
+
+// Check if a project is duration-locked (manual override preserved)
+const isProjectLocked = (project) => {
+  return project?.['Duration Locked'] === true || project?.['Duration Locked'] === 'checked';
 };
 
 // Map Current MFG Stage field to stage id
@@ -1816,6 +1935,10 @@ function ProductionSchedulerView({ projects }) {
   // 5. Each build spot holds up to 5 MODULES (not projects)
   //    SO1=1, HO2=2, HO3=3, HO4=4, HO5=5, HS6=6(3+3), HS8=8(4+4)
   // 6. Multiple projects can share a spot simultaneously if modules fit
+  // 7. Bay 9 (3S) cannot accommodate 3+ module units (HO5, HS6, HS8 excluded)
+  // 8. Duration Locked projects are NOT rescheduled
+  // 9. BOXX/BAR restricted to 4S (FAB FLEX)
+  // 10. Uses NETWORKDAYS (excludes weekends + Canadian holidays)
   
   const TWO_STORY_MODELS = ['HS6', 'HS8'];
   const FAB_SPOTS = ['4N', '4C', '4S'];
@@ -1824,9 +1947,16 @@ function ProductionSchedulerView({ projects }) {
   const MODULES_PER_SPOT = 5;
   
   const MODEL_MODULES = {
-    'SO1': 1, 'HO2': 2, 'HO3': 3, 'HO4': 4, 'HO5': 5,
+    'SO1': 1, 'AO1': 2, 'HO2': 2, 'HO3': 3, 'HO4': 4, 'HO5': 5,
     'HS6': 6, 'HS8': 8, 'CUSTOM': 3,
+    'BAR': 1, 'BOXX 8X10': 1, 'BOXX 8X20': 1, 'BOXX 8X40': 1,
   };
+
+  // Bay 9 (3S) cannot accommodate 3+ module units
+  const BAY_9_EXCLUDED_MODELS = ['HO3', 'HO4', 'HO5', 'HS6', 'HS8'];
+
+  // BOXX/BAR must use 4S (FAB FLEX) for fabrication
+  const FLEX_ONLY_MODELS = ['BAR', 'BOXX 8X10', 'BOXX 8X20', 'BOXX 8X40'];
   
   // For two-story, how modules split across 2 adjacent spots
   const TWO_STORY_SPLIT = { 'HS6': [3, 3], 'HS8': [4, 4] };
@@ -1841,11 +1971,15 @@ function ProductionSchedulerView({ projects }) {
   const runOptimizer = () => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    
+
     // Get production projects in queue order
     const productionProjects = projects
       .filter(p => p.Stage === 'Production' || p.Stage === 'Logistics' || p.Stage === 'Permitting')
       .sort((a, b) => (a['Production Order'] || 9999) - (b['Production Order'] || 9999));
+
+    // Separate locked projects (won't be rescheduled) from optimizable ones
+    const lockedProjects = productionProjects.filter(p => isProjectLocked(p));
+    const unlockedProjects = productionProjects.filter(p => !isProjectLocked(p));
     
     // ── TIMELINE-BASED CAPACITY TRACKING ──
     // Track module usage per spot over time: array of {startDay, endDay, modules}
@@ -1936,28 +2070,35 @@ function ProductionSchedulerView({ projects }) {
       const pos = p['Bay Assignment'];
       const startDate = p['Production Start'] ? new Date(p['Production Start']) : null;
       if (!pos || !startDate || !spotTimeline[pos]) return;
-      
+
       const model = (p['Model'] || 'HO3').toUpperCase();
-      const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const dur4 = getProjectDurations(p);
       const modules = MODEL_MODULES[model] || 3;
       const isTwoStory = TWO_STORY_MODELS.includes(model);
-      
+
+      // Use workday count from start date to today for offset
       const dayOffset = Math.round((startDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-      
-      // Estimate remaining days based on current stage
+
+      // Estimate remaining workdays using 4-stage model
       const currentStage = p['Current MFG Stage'];
       const stageKey = MFG_STAGE_MAP[currentStage];
-      let remainingDays = durations.total;
-      
+      let remainingDays = dur4.total;
+
       if (stageKey) {
-        const stageOrder = Object.keys(durations);
-        const currentIdx = stageOrder.indexOf(stageKey);
+        // Map display stage to parent stage to calculate remaining
+        const stageObj = MFG_STAGES.find(s => s.id === stageKey);
+        const parentStage = stageObj?.parentStage || 1;
         remainingDays = 0;
-        for (let i = currentIdx; i < stageOrder.length; i++) {
-          remainingDays += durations[stageOrder[i]] || 0;
-        }
+        if (parentStage <= 1) remainingDays += dur4.stage1;
+        if (parentStage <= 2) remainingDays += dur4.stage2;
+        if (parentStage <= 3) remainingDays += dur4.stage3;
+        if (parentStage <= 4) remainingDays += dur4.stage4;
+        // Subtract stages already fully completed
+        if (parentStage > 1) remainingDays -= dur4.stage1;
+        if (parentStage > 2) remainingDays -= dur4.stage2;
+        if (parentStage > 3) remainingDays -= dur4.stage3;
       }
-      
+
       const endDay = dayOffset + remainingDays;
       
       if (isTwoStory) {
@@ -1975,21 +2116,25 @@ function ProductionSchedulerView({ projects }) {
     });
     
     // ── SCHEDULE UNASSIGNED PROJECTS ──
-    const unscheduled = productionProjects.filter(p => !p['Bay Assignment'] || !p['Production Start']);
+    // Skip locked projects and already-assigned projects
+    const unscheduled = unlockedProjects.filter(p => !p['Bay Assignment'] || !p['Production Start']);
     const schedule = [];
-    
+
     unscheduled.forEach(p => {
       const model = (p['Model'] || 'HO3').toUpperCase();
-      const durations = MODEL_DURATIONS[model] || DEFAULT_DURATIONS;
+      const dur4 = getProjectDurations(p);
       const modules = MODEL_MODULES[model] || 3;
       const isTwoStory = TWO_STORY_MODELS.includes(model);
-      
-      // Phase 1: Fab (Bay 4) — modules needed in fab
-      const fabDays = durations.steel_fab + durations.sandblast;
+      const isFlexOnly = FLEX_ONLY_MODELS.includes(model);
+
+      // Phase 1: Fab — uses Stage 1 duration (Fabrication)
+      const fabDays = dur4.stage1;
       let bestFabStart = Infinity;
       let bestFabSpot = FAB_SPOTS[0];
-      
-      FAB_SPOTS.forEach(spot => {
+
+      // BOXX/BAR must use 4S (FAB FLEX); other models use any fab spot
+      const availableFabSpots = isFlexOnly ? ['4S'] : FAB_SPOTS;
+      availableFabSpots.forEach(spot => {
         const earliest = findEarliestSlot(spot, Math.min(modules, MODULES_PER_SPOT), fabDays, 0);
         if (earliest < bestFabStart) {
           bestFabStart = earliest;
@@ -2005,37 +2150,48 @@ function ProductionSchedulerView({ projects }) {
       let buildSpot2 = null;
       let buildStart = 0;
       
+      // Bay 9 constraint: 3S cannot fit 3+ module units (HO5, HS6, HS8)
+      const isBay9Excluded = BAY_9_EXCLUDED_MODELS.includes(model);
+      const availableBuildSpots = isBay9Excluded
+        ? BUILD_SPOTS_INDOOR.filter(s => s !== '3S')
+        : BUILD_SPOTS_INDOOR;
+
       if (isTwoStory) {
         const split = TWO_STORY_SPLIT[model] || [3, 3];
-        const indoorDays = durations.framing;
-        
+        // Indoor phase = Stage 2 (Rough-In) workdays
+        const indoorDays = dur4.stage2;
+
         // Need two adjacent spots with capacity for split modules
+        // Also respect Bay 9 constraint for HS units
         let bestPairStart = Infinity;
         let bestPair = null;
-        
-        DOUBLE_SPOT_PAIRS.forEach(([a, b]) => {
+
+        const eligiblePairs = isBay9Excluded
+          ? DOUBLE_SPOT_PAIRS.filter(([a, b]) => a !== '3S' && b !== '3S')
+          : DOUBLE_SPOT_PAIRS;
+
+        eligiblePairs.forEach(([a, b]) => {
           const earliest = findEarliestPairSlot(a, b, split[0], split[1], indoorDays, fabEnd);
           if (earliest < bestPairStart) {
             bestPairStart = earliest;
             bestPair = [a, b];
           }
         });
-        
+
         buildSpot = bestPair[0];
         buildSpot2 = bestPair[1];
         buildStart = bestPairStart;
-        
+
         bookSpot(buildSpot, buildStart, buildStart + indoorDays, split[0], p['Project ID']);
         bookSpot(buildSpot2, buildStart, buildStart + indoorDays, split[1], p['Project ID']);
-        
-        // Phase 2b: Outdoor for remaining build
+
+        // Phase 2b: Outdoor for remaining build (Stage 3 + Stage 4)
         const outdoorStart = buildStart + indoorDays;
-        const outdoorDays = durations.mep_rough + durations.insulation + durations.drywall + 
-                           durations.finishes + durations.cabinets_trim + durations.final_qc + durations.ready_to_ship;
-        
+        const outdoorDays = dur4.stage3 + dur4.stage4;
+
         let bestOutdoorStart = Infinity;
         let bestOutdoorSpot = OUTDOOR_BUILD_SPOTS[0];
-        
+
         OUTDOOR_BUILD_SPOTS.forEach(spot => {
           // Outdoor spots: two-story takes full spot
           const earliest = findEarliestSlot(spot, MODULES_PER_SPOT, outdoorDays, outdoorStart);
@@ -2044,16 +2200,15 @@ function ProductionSchedulerView({ projects }) {
             bestOutdoorSpot = spot;
           }
         });
-        
+
         const outdoorEnd = bestOutdoorStart + outdoorDays;
         bookSpot(bestOutdoorSpot, bestOutdoorStart, outdoorEnd, MODULES_PER_SPOT, p['Project ID']);
-        
+
         const totalDays = outdoorEnd - bestFabStart;
-        const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() + bestFabStart);
-        const endDate = new Date(now);
-        endDate.setDate(endDate.getDate() + outdoorEnd);
-        
+        // Use NETWORKDAYS for date calculations
+        const startDate = addWorkdays(now, bestFabStart);
+        const endDate = addWorkdays(now, outdoorEnd);
+
         schedule.push({
           projectId: p['Project ID'],
           airtableId: p.id,
@@ -2061,9 +2216,9 @@ function ProductionSchedulerView({ projects }) {
           modules,
           isTwoStory: true,
           phases: [
-            { spot: bestFabSpot, label: 'Fab', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
-            { spot: `${buildSpot}+${buildSpot2}`, label: 'Indoor (Framing)', startDay: buildStart, endDay: buildStart + indoorDays, days: indoorDays, modules: `${split[0]}+${split[1]}` },
-            { spot: bestOutdoorSpot, label: 'Outdoor Build', startDay: bestOutdoorStart, endDay: outdoorEnd, days: outdoorDays, modules },
+            { spot: bestFabSpot, label: 'Fab (Stage 1)', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
+            { spot: `${buildSpot}+${buildSpot2}`, label: 'Rough-In (Stage 2)', startDay: buildStart, endDay: buildStart + indoorDays, days: indoorDays, modules: `${split[0]}+${split[1]}` },
+            { spot: bestOutdoorSpot, label: 'Finishing + Final (Stage 3-4)', startDay: bestOutdoorStart, endDay: outdoorEnd, days: outdoorDays, modules },
           ],
           suggestedBay: bestFabSpot,
           suggestedStart: startDate.toISOString().split('T')[0],
@@ -2072,31 +2227,30 @@ function ProductionSchedulerView({ projects }) {
           name: p['Name'] || '',
         });
       } else {
-        // Single-story: full build indoor
-        const buildDays = durations.total - fabDays;
-        
+        // Single-story: full build indoor (Stages 2 + 3 + 4)
+        const buildDays = dur4.stage2 + dur4.stage3 + dur4.stage4;
+
         let bestBuildStart = Infinity;
-        let bestBuildSpot = BUILD_SPOTS_INDOOR[0];
-        
-        BUILD_SPOTS_INDOOR.forEach(spot => {
+        let bestBuildSpot = availableBuildSpots[0];
+
+        availableBuildSpots.forEach(spot => {
           const earliest = findEarliestSlot(spot, modules, buildDays, fabEnd);
           if (earliest < bestBuildStart) {
             bestBuildStart = earliest;
             bestBuildSpot = spot;
           }
         });
-        
+
         buildStart = bestBuildStart;
         buildSpot = bestBuildSpot;
         const buildEnd = buildStart + buildDays;
         bookSpot(buildSpot, buildStart, buildEnd, modules, p['Project ID']);
-        
+
         const totalDays = buildEnd - bestFabStart;
-        const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() + bestFabStart);
-        const endDate = new Date(now);
-        endDate.setDate(endDate.getDate() + buildEnd);
-        
+        // Use NETWORKDAYS for date calculations
+        const startDate = addWorkdays(now, bestFabStart);
+        const endDate = addWorkdays(now, buildEnd);
+
         schedule.push({
           projectId: p['Project ID'],
           airtableId: p.id,
@@ -2104,8 +2258,8 @@ function ProductionSchedulerView({ projects }) {
           modules,
           isTwoStory: false,
           phases: [
-            { spot: bestFabSpot, label: 'Fab', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
-            { spot: buildSpot, label: 'Indoor Build', startDay: buildStart, endDay: buildEnd, days: buildDays, modules },
+            { spot: bestFabSpot, label: 'Fab (Stage 1)', startDay: bestFabStart, endDay: fabEnd, days: fabDays, modules: Math.min(modules, MODULES_PER_SPOT) },
+            { spot: buildSpot, label: 'Build (Stage 2-4)', startDay: buildStart, endDay: buildEnd, days: buildDays, modules },
           ],
           suggestedBay: bestFabSpot,
           suggestedStart: startDate.toISOString().split('T')[0],
@@ -2154,13 +2308,22 @@ function ProductionSchedulerView({ projects }) {
     if (!optimizedSchedule) return;
     setApplyingSchedule(true);
     try {
-      for (const item of optimizedSchedule.schedule) {
+      // Only apply schedule to unlocked projects
+      const applyItems = optimizedSchedule.schedule.filter(item => {
+        const proj = projects.find(p => p.id === item.airtableId);
+        return !isProjectLocked(proj);
+      });
+      for (const item of applyItems) {
         await airtableAPI.updateProject(item.airtableId, {
           'Production Start': item.suggestedStart,
           'Bay Assignment': item.suggestedBay,
         });
       }
-      alert(`✅ Applied schedule to ${optimizedSchedule.schedule.length} projects. Refreshing...`);
+      const skipped = optimizedSchedule.schedule.length - applyItems.length;
+      const msg = skipped > 0
+        ? `✅ Applied schedule to ${applyItems.length} projects (${skipped} locked projects skipped). Refreshing...`
+        : `✅ Applied schedule to ${applyItems.length} projects. Refreshing...`;
+      alert(msg);
       window.location.reload();
     } catch (err) {
       alert('Error applying schedule: ' + err.message);
@@ -2182,8 +2345,8 @@ function ProductionSchedulerView({ projects }) {
         const position = p['Bay Assignment'] || null;
         const mfgWeek = parseInt(p['MFG Week']) || 0;
         const prodStartDate = p['Production Start'] ? new Date(p['Production Start']) : null;
-        const modelDurations = MODEL_DURATIONS[p['Model']?.toUpperCase()] || DEFAULT_DURATIONS;
-        const durationWeeks = Math.ceil(modelDurations.total / 5);
+        const dur4 = getProjectDurations(p);
+        const durationWeeks = Math.ceil(dur4.total / 5);
         
         let startWeek = null, status = 'queued';
         
@@ -3135,7 +3298,7 @@ function FloorSimulatorView({ projects, onEdit }) {
   const projectAnalysis = useMemo(() => {
     const targetDate = new Date(selectedDate);
     const today = new Date();
-    const daysFromNow = Math.floor((targetDate - today) / (1000 * 60 * 60 * 24));
+    const daysFromNow = countWorkdays(today, targetDate);
     
     return productionProjects.map(p => {
       const model = (p['Model'] || 'HO3').toUpperCase();
@@ -3156,7 +3319,7 @@ function FloorSimulatorView({ projects, onEdit }) {
       const productionStart = p['Production Start'] ? new Date(p['Production Start']) : null;
       let daysInCurrentStage = 0;
       if (productionStart) {
-        const daysSinceStart = Math.floor((today - productionStart) / (1000 * 60 * 60 * 24));
+        const daysSinceStart = countWorkdays(productionStart, today);
         // Estimate days in current stage
         const daysBeforeCurrent = daysCompleted;
         daysInCurrentStage = Math.max(0, daysSinceStart - daysBeforeCurrent);
@@ -3188,10 +3351,9 @@ function FloorSimulatorView({ projects, onEdit }) {
       else if (projectedStage.location === 'outside') projectedLocation = 'OW'; // Outside
       else if (projectedStage.location === 'flex') projectedLocation = 'OF1'; // Flex
       
-      // Estimated completion date
+      // Estimated completion date (using NETWORKDAYS)
       const remainingDays = totalDays - (daysCompleted + daysInCurrentStage);
-      const estCompletion = new Date(today);
-      estCompletion.setDate(estCompletion.getDate() + remainingDays);
+      const estCompletion = addWorkdays(today, Math.max(0, remainingDays));
       
       return {
         ...p,
@@ -3595,7 +3757,7 @@ function ProductionAnalyticsView({ projects }) {
         const startDate = p[stage.startField] ? new Date(p[stage.startField]) : null;
         
         if (endDate && startDate) {
-          const days = Math.max(0, Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)));
+          const days = Math.max(0, countWorkdays(startDate, endDate));
           stageDurations[stage.id] = {
             actual: days,
             target: targetDurations[stage.id] || 0,
