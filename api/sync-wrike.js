@@ -1,14 +1,17 @@
 /**
  * Wrike → Airtable Nightly Sync (Vercel Cron)
  *
- * Runs daily at 11 PM MST (06:00 UTC). Pulls manufacturing stage data from Wrike
- * and writes actual dates + status into Airtable project records.
+ * Runs daily at 11 PM MST (06:00 UTC). Pulls manufacturing project data from
+ * Wrike's "Scheduled Builds" space and writes status + dates into Airtable.
  *
- * Architecture:
- *   1. Fetch all Wrike folders under the MFG space (each folder = one project)
- *   2. For each folder, get the 4 stage tasks (Fabrication, Rough-In, Finishing, Finalizing)
- *   3. Match folder name to Airtable Project ID (e.g., "HO709 - Smith Residence" → "HO709")
- *   4. Write actual start/end dates + current stage status into Airtable
+ * How Wrike is actually structured (discovered via API exploration):
+ *   - "Scheduled Builds" space (ID: IEAEJ3HPI4TYP6UM) is the primary space
+ *   - Projects are FOLDERS with a project.customStatusId from one of two workflows:
+ *     • (Ops) Honomobo Workflow: lifecycle statuses (Manufacturing, Shipped, etc.)
+ *     • (MFG) Manufacturing Workflow: stage statuses (STAGE 1-4, Ready To Ship, etc.)
+ *   - Stage data lives at the PROJECT STATUS LEVEL (not as tasks inside folders)
+ *   - Custom fields on projects provide dates: Target FAB Start, Ship Date, Build Spot, etc.
+ *   - Project IDs are embedded in folder titles: "HO755 - Holland - G5 HO3 KL T1 - CA"
  *
  * Environment Variables (set in Vercel dashboard):
  *   WRIKE_ACCESS_TOKEN   — Wrike permanent access token
@@ -22,41 +25,84 @@
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID || 'appkJr6ogN6O1nxxg';
 const AIRTABLE_TABLE = 'Projects';
 
-// Wrike stage names → Airtable field mapping
-// These match Curtis's Wrike Blueprint 1:1
-const STAGE_MAP = {
-  'Stage 1: Fabrication': {
-    statusField: 'Wrike Stage 1 Status',
-    startField:  'Wrike Stage 1 Start (Actual)',
-    endField:    'Wrike Stage 1 End (Actual)',
-    stageNum: 1,
-  },
-  'Stage 2: Rough-In': {
-    statusField: 'Wrike Stage 2 Status',
-    startField:  'Wrike Stage 2 Start (Actual)',
-    endField:    'Wrike Stage 2 End (Actual)',
-    stageNum: 2,
-  },
-  'Stage 3: Finishing': {
-    statusField: 'Wrike Stage 3 Status',
-    startField:  'Wrike Stage 3 Start (Actual)',
-    endField:    'Wrike Stage 3 End (Actual)',
-    stageNum: 3,
-  },
-  'Stage 4: Finalizing': {
-    statusField: 'Wrike Stage 4 Status',
-    startField:  'Wrike Stage 4 Start (Actual)',
-    endField:    'Wrike Stage 4 End (Actual)',
-    stageNum: 4,
-  },
+// Wrike space ID for "Scheduled Builds"
+const SCHEDULED_BUILDS_SPACE = 'IEAEJ3HPI4TYP6UM';
+
+// ── WRIKE CUSTOM STATUS ID → STAGE MAPPING ──────────────────────────────────
+// These are the actual custom status IDs from the (MFG) Manufacturing workflow
+// discovered via the Wrike API /workflows endpoint
+
+const MFG_STATUS_MAP = {
+  // Pre-manufacturing statuses
+  'IEAEJ3HPJMB6MDDY': { stage: 'PRE-IFC',                  stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMCNYIR6': { stage: 'Waiting For Drawings',     stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMDPUIWI': { stage: 'Waiting For Build Deposit', stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMB6MDEC': { stage: 'IFC',                      stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMGK57WS': { stage: 'Waiting on Build Spot',    stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMDPT72G': { stage: 'BUILD SPOT EMPTY',         stageNum: 0, group: 'pre' },
+  'IEAEJ3HPJMDPUDEY': { stage: 'EMPTY FAB SPOT',           stageNum: 0, group: 'pre' },
+
+  // The 4 manufacturing stages
+  'IEAEJ3HPJMB6MDEM': { stage: 'STAGE 1 (FABRICATION)',    stageNum: 1, group: 'mfg' },
+  'IEAEJ3HPJMCIODZE': { stage: 'STAGE 2 (ROUGH-IN)',       stageNum: 2, group: 'mfg' },
+  'IEAEJ3HPJMB6MDEW': { stage: 'STAGE 3 (FINISHING)',      stageNum: 3, group: 'mfg' },
+  'IEAEJ3HPJMB6MDFA': { stage: 'Finishing',                stageNum: 3, group: 'mfg' },  // alternate
+  'IEAEJ3HPJMCIODZO': { stage: 'STAGE 4 (FINALIZING)',     stageNum: 4, group: 'mfg' },
+
+  // Post-manufacturing
+  'IEAEJ3HPJMB6MDFK': { stage: 'Ready To Ship',           stageNum: 5, group: 'post' },
+  'IEAEJ3HPJMDROQSU': { stage: 'In Storage',               stageNum: 5, group: 'post' },
+  'IEAEJ3HPJMB6MDDZ': { stage: 'Shipped',                 stageNum: 6, group: 'done' },
+
+  // Terminal
+  'IEAEJ3HPJMCC4JQE': { stage: 'Not Scheduled',           stageNum: -1, group: 'hold' },
+  'IEAEJ3HPJMCC4I66': { stage: 'On Hold',                  stageNum: -1, group: 'hold' },
+  'IEAEJ3HPJMCNYIZR': { stage: 'Cancelled',                stageNum: -1, group: 'cancelled' },
 };
 
-// Also accept shortened stage names (some Wrike setups may not prefix "Stage N:")
-const STAGE_ALIASES = {
-  'Fabrication':  'Stage 1: Fabrication',
-  'Rough-In':    'Stage 2: Rough-In',
-  'Finishing':   'Stage 3: Finishing',
-  'Finalizing':  'Stage 4: Finalizing',
+// (Ops) Honomobo Workflow statuses that indicate manufacturing
+const OPS_MFG_STATUSES = {
+  'IEAEJ3HPJMB4LDAK': { stage: 'Manufacturing',             group: 'mfg' },
+  'IEAEJ3HPJMCRCQQM': { stage: 'Manufacturing (without permit)', group: 'mfg' },
+  'IEAEJ3HPJMB4LDAA': { stage: 'IFC',                       group: 'pre' },
+  'IEAEJ3HPJMCRCQQC': { stage: 'IFC MOD (no permit)',       group: 'pre' },
+  'IEAEJ3HPJMB6MFXQ': { stage: 'Wrapped & Waiting',        group: 'post' },
+  'IEAEJ3HPJMCRCQQW': { stage: 'Wrapped & Waiting (no permit)', group: 'post' },
+  'IEAEJ3HPJMB6MFX2': { stage: 'Shipped',                   group: 'done' },
+  'IEAEJ3HPJMB6MFYE': { stage: 'Install',                   group: 'done' },
+};
+
+// ── WRIKE CUSTOM FIELD IDs ──────────────────────────────────────────────────
+// Discovered via /customfields endpoint
+
+const WRIKE_CUSTOM_FIELDS = {
+  'IEAEJ3HPJUACGN6P': 'Target FAB Start',
+  'IEAEJ3HPJUAHTBJW': 'Fab Target Start',
+  'IEAEJ3HPJUAH55JD': 'Fab Target Start (alt)',
+  'IEAEJ3HPJUAEBQH2': 'Mfg Start',
+  'IEAEJ3HPJUAEBQHY': 'Fab End Date',
+  'IEAEJ3HPJUAB75MX': 'Ship Date (Target)',
+  'IEAEJ3HPJUAI7D3M': 'Ship Date (Confirmed)',
+  'IEAEJ3HPJUAJDRW2': 'Projected Ship Ready Date',
+  'IEAEJ3HPJUACGN6O': 'Build Deposit',
+  'IEAEJ3HPJUACGNVY': 'MOD IFC Ready',
+  'IEAEJ3HPJUAB5DCJ': 'Permit Issue (Target)',
+  'IEAEJ3HPJUACYAPJ': 'Build Spot',
+  'IEAEJ3HPJUACNW3P': 'Approved Concept',
+  'IEAEJ3HPJUAHV4K2': 'Estimated IFC Date',
+  'IEAEJ3HPJUAB2LEZ': 'Booked effort',
+};
+
+// Map Wrike custom field IDs → Airtable field names
+const FIELD_TO_AIRTABLE = {
+  'IEAEJ3HPJUAEBQH2': 'Wrike MFG Start',
+  'IEAEJ3HPJUAEBQHY': 'Wrike Fab End Date',
+  'IEAEJ3HPJUACGN6P': 'Wrike Target FAB Start',
+  'IEAEJ3HPJUAHTBJW': 'Wrike Fab Target Start',
+  'IEAEJ3HPJUAB75MX': 'Wrike Ship Date (Target)',
+  'IEAEJ3HPJUAI7D3M': 'Wrike Ship Date (Confirmed)',
+  'IEAEJ3HPJUAJDRW2': 'Wrike Projected Ship Ready',
+  'IEAEJ3HPJUACYAPJ': 'Wrike Build Spot',
 };
 
 // ── API HELPERS ────────────────────────────────────────────────────────────────
@@ -103,81 +149,87 @@ async function airtableFetch(endpoint, options = {}) {
 
 /**
  * Extract project ID from a Wrike folder title.
- * Matches patterns like: "HO709", "HS801", "SO103", "AO104", "BOXX 8X20"
- * from folder names like "HO709 - Smith Residence"
+ * Handles patterns like:
+ *   "HO755 - Holland - G5 HO3 KL T1 - CA"      → "HO755"
+ *   "HO709 - Sooreddy - G4 HS8 CA"              → "HO709"
+ *   "HO726-A - Hughes - G4 HO4 - Hawaii"        → "HO726A" (strip dash for sub-units)
+ *   "[HO622 (Hakimimehr McAdams)] 3 D&E"         → "HO622"
+ *   "HO762 - BOXX - 8x40 - Alberta"             → "HO762"
+ *   "HO711 (BOXX Modular) 8x10 Seacan Lavs x5" → "HO711"
  */
 function extractProjectId(folderTitle) {
   if (!folderTitle) return null;
 
-  // Match BOXX patterns first (e.g., "BOXX 8X20 - Project Name")
-  const boxxMatch = folderTitle.match(/\b(BOXX\s*\d+[Xx]\d+)\b/i);
-  if (boxxMatch) return boxxMatch[1].toUpperCase();
+  // Match HO### or HO###-A/B (sub-units) — first occurrence
+  const hoMatch = folderTitle.match(/\b(HO\d{3,4})(?:-?([A-Z]))?\b/i);
+  if (hoMatch) {
+    const base = hoMatch[1].toUpperCase();
+    const suffix = hoMatch[2] ? hoMatch[2].toUpperCase() : '';
+    return base + suffix;
+  }
 
-  // Match BAR pattern
-  const barMatch = folderTitle.match(/\b(BAR\d*)\b/i);
-  if (barMatch) return barMatch[1].toUpperCase();
+  // Match HS### pattern
+  const hsMatch = folderTitle.match(/\b(HS\d{3,4})\b/i);
+  if (hsMatch) return hsMatch[1].toUpperCase();
 
-  // Match standard HO/HS/SO/AO + digits pattern
-  const stdMatch = folderTitle.match(/\b([A-Z]{2}\d{3,4})\b/i);
-  if (stdMatch) return stdMatch[1].toUpperCase();
+  // Match SO### / AO### pattern
+  const otherMatch = folderTitle.match(/\b([A-Z]{2}\d{3,4})\b/i);
+  if (otherMatch) return otherMatch[1].toUpperCase();
 
   return null;
 }
 
 /**
- * Determine the current manufacturing stage from task statuses.
- * Returns the highest-numbered stage that has started but not completed,
- * or the last completed stage if all are done.
+ * Extract model type from folder title.
+ * "HO755 - Holland - G5 HO3 KL T1 - CA" → "HO3"
+ * "HO709 - Sooreddy - G4 HS8 CA"         → "HS8"
  */
-function determineCurrentStage(stageTasks) {
-  let currentStage = null;
-  let highestCompleted = 0;
+function extractModelType(folderTitle) {
+  if (!folderTitle) return null;
 
-  for (const task of stageTasks) {
-    const stageInfo = resolveStageInfo(task.title);
-    if (!stageInfo) continue;
+  // Match G# model patterns: "G4 HO5", "G5 HO3", "G4 HS8", etc.
+  const modelMatch = folderTitle.match(/G\d+\s+(HO\d|HS\d|SO\d|AO\d)/i);
+  if (modelMatch) return modelMatch[1].toUpperCase();
 
-    const status = task.status?.toLowerCase() || '';
+  // Match standalone model: "HO5+", "HO2", "MOBO", "BAR", "BOXX"
+  const standaloneMatch = folderTitle.match(/\b(HO[1-5]\+?|HS[68]|MOBO|BAR|BOXX)\b/i);
+  if (standaloneMatch) return standaloneMatch[1].toUpperCase().replace('+', '');
 
-    if (status === 'active' || status === 'inprogress' || status === 'in progress') {
-      // Active stage — this is the current one
-      if (!currentStage || stageInfo.stageNum > currentStage.stageNum) {
-        currentStage = stageInfo;
-      }
-    } else if (status === 'completed' || status === 'done') {
-      if (stageInfo.stageNum > highestCompleted) {
-        highestCompleted = stageInfo.stageNum;
-      }
-    }
-  }
-
-  // If no active stage found, next stage after highest completed is "current"
-  if (!currentStage && highestCompleted > 0 && highestCompleted < 4) {
-    const nextStageNum = highestCompleted + 1;
-    const nextStageKey = Object.keys(STAGE_MAP).find(k => STAGE_MAP[k].stageNum === nextStageNum);
-    if (nextStageKey) currentStage = STAGE_MAP[nextStageKey];
-  }
-
-  return currentStage;
+  return null;
 }
 
-function resolveStageInfo(taskTitle) {
-  if (!taskTitle) return null;
+/**
+ * Resolve the manufacturing stage from a Wrike project's customStatusId.
+ * Checks both (MFG) Manufacturing and (Ops) Honomobo workflows.
+ */
+function resolveWrikeStatus(customStatusId) {
+  // Check MFG Manufacturing workflow first (more granular)
+  if (MFG_STATUS_MAP[customStatusId]) {
+    return MFG_STATUS_MAP[customStatusId];
+  }
 
-  // Direct match
-  if (STAGE_MAP[taskTitle]) return STAGE_MAP[taskTitle];
-
-  // Alias match
-  const aliasKey = Object.keys(STAGE_ALIASES).find(a => taskTitle.includes(a));
-  if (aliasKey) return STAGE_MAP[STAGE_ALIASES[aliasKey]];
-
-  // Partial match (e.g., "Fabrication" anywhere in the title)
-  for (const [key, info] of Object.entries(STAGE_MAP)) {
-    const stageName = key.split(': ')[1]; // "Fabrication", "Rough-In", etc.
-    if (stageName && taskTitle.includes(stageName)) return info;
+  // Fall back to (Ops) Honomobo Workflow
+  if (OPS_MFG_STATUSES[customStatusId]) {
+    return OPS_MFG_STATUSES[customStatusId];
   }
 
   return null;
+}
+
+/**
+ * Parse custom fields from a Wrike project into a readable object.
+ */
+function parseCustomFields(customFields) {
+  const result = {};
+  if (!customFields) return result;
+
+  for (const cf of customFields) {
+    const fieldName = WRIKE_CUSTOM_FIELDS[cf.id];
+    if (fieldName) {
+      result[fieldName] = cf.value;
+    }
+  }
+  return result;
 }
 
 // ── AIRTABLE HELPERS ───────────────────────────────────────────────────────────
@@ -191,19 +243,19 @@ async function getAllAirtableProjects() {
   let offset = null;
 
   do {
-    const params = new URLSearchParams({
-      'fields[]': ['Project ID', 'Wrike Project ID', 'Wrike Last Synced'].flat(),
-      pageSize: '100',
-    });
-    if (offset) params.set('offset', offset);
+    let url = `/${encodeURIComponent(AIRTABLE_TABLE)}?pageSize=100`;
+    // Request specific fields to minimize payload
+    url += '&fields%5B%5D=Project+ID&fields%5B%5D=Wrike+Project+ID&fields%5B%5D=Wrike+Last+Synced&fields%5B%5D=Name';
+    if (offset) url += `&offset=${offset}`;
 
-    const data = await airtableFetch(`/${encodeURIComponent(AIRTABLE_TABLE)}?${params.toString()}`);
+    const data = await airtableFetch(url);
 
     for (const record of data.records || []) {
       const projectId = record.fields['Project ID'];
       if (projectId) {
         projectMap.set(projectId.toUpperCase(), {
           recordId: record.id,
+          name: record.fields['Name'] || '',
           wrikeProjectId: record.fields['Wrike Project ID'] || null,
           lastSynced: record.fields['Wrike Last Synced'] || null,
         });
@@ -217,8 +269,7 @@ async function getAllAirtableProjects() {
 }
 
 /**
- * Update an Airtable record with Wrike stage data.
- * Uses PATCH to only update specified fields.
+ * Update an Airtable record with Wrike data.
  */
 async function updateAirtableProject(recordId, fields) {
   return airtableFetch(`/${encodeURIComponent(AIRTABLE_TABLE)}/${recordId}`, {
@@ -235,6 +286,7 @@ async function syncWrikeToAirtable() {
   let synced = 0;
   let skipped = 0;
   let notFound = 0;
+  let notMfg = 0;
 
   log.push(`[${new Date().toISOString()}] Starting Wrike → Airtable sync`);
 
@@ -242,104 +294,95 @@ async function syncWrikeToAirtable() {
   const airtableProjects = await getAllAirtableProjects();
   log.push(`Found ${airtableProjects.size} projects in Airtable`);
 
-  // Step 2: Get Wrike space/folder structure
-  // First, get all folders in account (we'll filter to manufacturing projects)
-  const foldersData = await wrikeFetch('/folders', {
-    fields: '["description"]',
-  });
+  // Step 2: Get all projects from "Scheduled Builds" space (bulk — no custom fields)
+  const foldersData = await wrikeFetch(
+    `/spaces/${SCHEDULED_BUILDS_SPACE}/folders`,
+    { project: 'true' }
+  );
 
-  const allFolders = foldersData.data || [];
-  log.push(`Found ${allFolders.length} total Wrike folders`);
+  const allProjects = (foldersData.data || []).filter(f => f.project);
+  log.push(`Found ${allProjects.length} Wrike projects in Scheduled Builds`);
 
-  // Step 3: For each folder, try to match to an Airtable project
-  for (const folder of allFolders) {
-    const projectId = extractProjectId(folder.title);
-    if (!projectId) continue; // Skip non-project folders
+  // Step 3: Filter to MFG-relevant projects, then fetch each individually for custom fields
+  const candidates = [];
+  for (const wp of allProjects) {
+    const customStatusId = wp.project?.customStatusId;
+    const statusInfo = resolveWrikeStatus(customStatusId);
+
+    if (!statusInfo) { notMfg++; continue; }
+    if (statusInfo.group === 'cancelled' || statusInfo.group === 'hold') { skipped++; continue; }
+
+    const projectId = extractProjectId(wp.title);
+    if (!projectId) { skipped++; continue; }
 
     const airtableRecord = airtableProjects.get(projectId);
     if (!airtableRecord) {
       notFound++;
-      continue; // No matching Airtable project
+      log.push(`⚠ No Airtable match for ${projectId} ("${wp.title}")`);
+      continue;
     }
 
+    candidates.push({ wrikeProject: wp, projectId, statusInfo, airtableRecord });
+  }
+
+  log.push(`Matched ${candidates.length} MFG projects to Airtable records`);
+
+  // Step 4: For each matched project, fetch full details (with custom fields) and sync
+  for (const { wrikeProject, projectId, statusInfo, airtableRecord } of candidates) {
     try {
-      // Step 4: Get tasks in this folder (the stage tasks)
-      const tasksData = await wrikeFetch(`/folders/${folder.id}/tasks`, {
-        fields: '["dates","status"]',
-      });
+      // Fetch individual folder to get custom fields (bulk endpoint doesn't include them)
+      const detailData = await wrikeFetch(`/folders/${wrikeProject.id}`);
+      const detail = detailData.data?.[0] || wrikeProject;
 
-      const tasks = tasksData.data || [];
-      if (tasks.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      // Step 5: Extract stage data from tasks
+      // Build the update payload
       const updateFields = {
-        'Wrike Project ID': folder.id,
+        'Wrike Project ID': wrikeProject.id,
+        'Wrike MFG Status': statusInfo.stage,
         'Wrike Last Synced': new Date().toISOString(),
+        'Wrike URL': detail.permalink || wrikeProject.permalink || '',
       };
 
-      let hasStageData = false;
+      // Add project-level dates
+      const proj = detail.project || wrikeProject.project || {};
+      if (proj.startDate) {
+        updateFields['Wrike Project Start'] = proj.startDate;
+      }
+      if (proj.endDate) {
+        updateFields['Wrike Project End'] = proj.endDate;
+      }
 
-      for (const task of tasks) {
-        const stageInfo = resolveStageInfo(task.title);
-        if (!stageInfo) continue; // Not a stage task
-
-        hasStageData = true;
-        const status = task.status || 'Unknown';
-
-        // Map Wrike status to our status values
-        let mappedStatus = 'Not Started';
-        const statusLower = status.toLowerCase();
-        if (statusLower === 'completed' || statusLower === 'done') {
-          mappedStatus = 'Complete';
-        } else if (statusLower === 'active' || statusLower === 'inprogress' || statusLower === 'in progress') {
-          mappedStatus = 'In Progress';
-        } else if (statusLower === 'deferred' || statusLower === 'cancelled') {
-          mappedStatus = 'Deferred';
-        }
-
-        updateFields[stageInfo.statusField] = mappedStatus;
-
-        // Write dates if available
-        if (task.dates) {
-          if (task.dates.start) {
-            updateFields[stageInfo.startField] = task.dates.start;
-          }
-          if (task.dates.due) {
-            updateFields[stageInfo.endField] = task.dates.due;
-          }
+      // Parse and add custom field dates from the detailed response
+      const customFields = detail.customFields || [];
+      for (const [wrikeFieldId, airtableFieldName] of Object.entries(FIELD_TO_AIRTABLE)) {
+        const cf = customFields.find(c => c.id === wrikeFieldId);
+        if (cf && cf.value && cf.value !== '[]' && cf.value !== '0') {
+          updateFields[airtableFieldName] = cf.value;
         }
       }
 
-      // Determine current overall MFG stage
-      const currentStage = determineCurrentStage(tasks);
-      if (currentStage) {
-        const stageKey = Object.keys(STAGE_MAP).find(k => STAGE_MAP[k].stageNum === currentStage.stageNum);
-        if (stageKey) {
-          updateFields['Wrike MFG Status'] = stageKey;
-        }
+      // Extract model type from title if available
+      const modelType = extractModelType(wrikeProject.title);
+      if (modelType) {
+        updateFields['Wrike Model Type'] = modelType;
       }
 
-      if (hasStageData) {
-        await updateAirtableProject(airtableRecord.recordId, updateFields);
-        synced++;
-        log.push(`✓ Synced ${projectId} (${Object.keys(updateFields).length - 2} stage fields)`);
-      } else {
-        skipped++;
-      }
+      // Write to Airtable
+      await updateAirtableProject(airtableRecord.recordId, updateFields);
+      synced++;
+
+      const fieldCount = Object.keys(updateFields).length - 3;
+      log.push(`✓ ${projectId} → ${statusInfo.stage} (${fieldCount} extra fields)`);
 
     } catch (err) {
       errors.push(`Error syncing ${projectId}: ${err.message}`);
     }
 
-    // Respect Wrike rate limits (100 req/min)
-    await new Promise(r => setTimeout(r, 150));
+    // Respect Wrike rate limits (100 req/min) — 2 API calls per project (detail + Airtable)
+    await new Promise(r => setTimeout(r, 200));
   }
 
   log.push(`\n── SYNC COMPLETE ──`);
-  log.push(`Synced: ${synced} | Skipped: ${skipped} | Not in Airtable: ${notFound} | Errors: ${errors.length}`);
+  log.push(`Synced: ${synced} | Skipped: ${skipped} | Not in Airtable: ${notFound} | Not MFG: ${notMfg} | Errors: ${errors.length}`);
 
   if (errors.length > 0) {
     log.push(`\nErrors:\n${errors.join('\n')}`);
@@ -349,6 +392,7 @@ async function syncWrikeToAirtable() {
     synced,
     skipped,
     notFound,
+    notMfg,
     errors: errors.length,
     log: log.join('\n'),
   };
